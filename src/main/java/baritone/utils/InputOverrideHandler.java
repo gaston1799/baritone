@@ -23,6 +23,7 @@ import baritone.api.event.events.TickEvent;
 import baritone.api.utils.IInputOverrideHandler;
 import baritone.api.utils.input.Input;
 import baritone.behavior.Behavior;
+import baritone.pathing.movement.MovementHelper;
 import net.minecraft.client.player.KeyboardInput;
 
 import java.util.HashMap;
@@ -45,6 +46,7 @@ public final class InputOverrideHandler extends Behavior implements IInputOverri
 
     private final BlockBreakHelper blockBreakHelper;
     private final BlockPlaceHelper blockPlaceHelper;
+    private boolean sprintKeyForcedByBaritone;
 
     public InputOverrideHandler(Baritone baritone) {
         super(baritone);
@@ -87,11 +89,15 @@ public final class InputOverrideHandler extends Behavior implements IInputOverri
         if (event.getType() == TickEvent.Type.OUT) {
             return;
         }
+        if (MovementHelper.isConsumingItem(ctx)) {
+            setInputForceState(Input.CLICK_LEFT, false);
+        }
         if (isInputForcedDown(Input.CLICK_LEFT)) {
             setInputForceState(Input.CLICK_RIGHT, false);
         }
         blockBreakHelper.tick(isInputForcedDown(Input.CLICK_LEFT));
         blockPlaceHelper.tick(isInputForcedDown(Input.CLICK_RIGHT));
+        syncSprintKey();
 
         if (inControl()) {
             if (ctx.player().input.getClass() != PlayerMovementInput.class) {
@@ -106,8 +112,16 @@ public final class InputOverrideHandler extends Behavior implements IInputOverri
         // gotta do it this way, or else it constantly thinks you're beginning a double tap W sprint lol
     }
 
+    private void syncSprintKey() {
+        boolean forced = isInputForcedDown(Input.SPRINT);
+        if (forced || sprintKeyForcedByBaritone) {
+            ctx.minecraft().options.keySprint.setDown(forced);
+            sprintKeyForcedByBaritone = forced;
+        }
+    }
+
     private boolean inControl() {
-        for (Input input : new Input[]{Input.MOVE_FORWARD, Input.MOVE_BACK, Input.MOVE_LEFT, Input.MOVE_RIGHT, Input.SNEAK, Input.JUMP}) {
+        for (Input input : new Input[]{Input.MOVE_FORWARD, Input.MOVE_BACK, Input.MOVE_LEFT, Input.MOVE_RIGHT, Input.SNEAK, Input.JUMP, Input.SPRINT}) {
             if (isInputForcedDown(input)) {
                 return true;
             }

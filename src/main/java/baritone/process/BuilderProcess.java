@@ -41,6 +41,7 @@ import baritone.utils.schematic.SchematicSystem;
 import baritone.utils.schematic.SelectionSchematic;
 import baritone.utils.schematic.litematica.LitematicaHelper;
 import baritone.utils.schematic.schematica.SchematicaHelper;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.core.BlockPos;
@@ -64,6 +65,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 import java.io.File;
 import java.io.FileInputStream;
 import java.util.*;
+import java.util.OptionalInt;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -84,6 +86,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private String name;
     private ISchematic realSchematic;
     private ISchematic schematic;
+    private boolean schematicPrefersTopDown;
+    private Set<BetterBlockPos> recentlyPlaced = new HashSet<>();
     private Vec3i origin;
     private int ticks;
     private boolean paused;
@@ -101,6 +105,12 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         this.name = name;
         this.schematic = schematic;
         this.realSchematic = null;
+        // Capture preferTopDown from the original unwrapped schematic before wrappers obscure it.
+        this.schematicPrefersTopDown = schematic.preferTopDown();
+        this.recentlyPlaced = new HashSet<>();
+        logDirect("[builder:schematic:create] type=" + schematic.getClass().getSimpleName()
+                + " preferTopDown=" + this.schematicPrefersTopDown
+                + " size=" + schematic.widthX() + "x" + schematic.heightY() + "x" + schematic.lengthZ());
         boolean buildingSelectionSchematic = schematic instanceof SelectionSchematic;
         if (!Baritone.settings().buildSubstitutes.value.isEmpty()) {
             this.schematic = new SubstituteSchematic(this.schematic, Baritone.settings().buildSubstitutes.value);
@@ -266,15 +276,54 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         return state;
     }
 
+    private int currentTargetY(boolean topDown) {
+        if (incorrectPositions == null || incorrectPositions.isEmpty()) return Integer.MIN_VALUE;
+        OptionalInt opt = incorrectPositions.stream()
+                .mapToInt(p -> p.y)
+                .reduce(topDown ? Integer::max : Integer::min);
+        return opt.isPresent() ? opt.getAsInt() : Integer.MIN_VALUE;
+    }
+
     private Optional<Tuple<BetterBlockPos, Rotation>> toBreakNearPlayer(BuilderCalculationContext bcc) {
         BetterBlockPos center = ctx.playerFeet();
         BetterBlockPos pathStart = baritone.getPathingBehavior().pathStart();
+        int dyMin = schematicPrefersTopDown ? 0 : (Baritone.settings().breakFromAbove.value ? -1 : 0);
+        int dyMax = 5;
+        // In top-down mode only opportunistically break blocks that are in the current target
+        // layer. Scaffold blocks at other Y levels are left alone; the pathfinder navigates
+        // through them via movement costs, and they get swept when their layer becomes the target.
+        int targetAbsY = schematicPrefersTopDown ? currentTargetY(true) : Integer.MIN_VALUE;
+        // Release deferred scaffold blocks once they are the only wrong blocks left on this layer.
+        if (schematicPrefersTopDown && targetAbsY != Integer.MIN_VALUE
+                && !recentlyPlaced.isEmpty() && incorrectPositions != null) {
+            boolean onlyScaffoldLeft = incorrectPositions.stream()
+                    .filter(p -> p.y == targetAbsY)
+                    .allMatch(recentlyPlaced::contains);
+            if (onlyScaffoldLeft) {
+                logDirect("[builder:scaffold-release] releasing " + recentlyPlaced.size() + " deferred blocks at Y=" + targetAbsY);
+                recentlyPlaced.clear();
+            }
+        }
         for (int dx = -5; dx <= 5; dx++) {
-            for (int dy = Baritone.settings().breakFromAbove.value ? -1 : 0; dy <= 5; dy++) {
+            for (int dyStep = dyMin; dyStep <= dyMax; dyStep++) {
+                int dy = schematicPrefersTopDown ? (dyMax - dyStep + dyMin) : dyStep;
                 for (int dz = -5; dz <= 5; dz++) {
                     int x = center.x + dx;
                     int y = center.y + dy;
                     int z = center.z + dz;
+                    if (targetAbsY != Integer.MIN_VALUE && y != targetAbsY) {
+                        // log only if it's actually a wrong block (would have been broken without the filter)
+                        BlockState _skipCurr = bcc.bsi.get0(x, y, z);
+                        if (!(_skipCurr.getBlock() instanceof AirBlock)) {
+                            BlockState _skipDesired = bcc.getSchematic(x, y, z, _skipCurr);
+                            if (_skipDesired != null && !valid(_skipCurr, _skipDesired, false)) {
+                                logDirect("[builder:skip] " + x + " " + y + " " + z
+                                        + " block=" + _skipCurr.getBlock().getDescriptionId()
+                                        + " targetY=" + targetAbsY + " (wrong layer, suppressed)");
+                            }
+                        }
+                        continue; // only touch the current target layer
+                    }
                     if (dy == -1 && x == pathStart.x && z == pathStart.z) {
                         continue; // dont mine what we're supported by, but not directly standing on
                     }
@@ -285,6 +334,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                     BlockState curr = bcc.bsi.get0(x, y, z);
                     if (!(curr.getBlock() instanceof AirBlock) && !(curr.getBlock() == Blocks.WATER || curr.getBlock() == Blocks.LAVA) && !valid(curr, desired, false)) {
                         BetterBlockPos pos = new BetterBlockPos(x, y, z);
+                        if (recentlyPlaced.contains(pos)) {
+                            continue; // deferred scaffold — wait until rest of layer is cleared
+                        }
                         Optional<Rotation> rot = RotationUtils.reachable(ctx, pos, ctx.playerController().getBlockReachDistance());
                         if (rot.isPresent()) {
                             return Optional.of(new Tuple<>(pos, rot.get()));
@@ -537,6 +589,16 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             // only change look direction if it's safe (don't want to fuck up an in progress parkour for example
             Rotation rot = toBreak.get().getB();
             BetterBlockPos pos = toBreak.get().getA();
+            BetterBlockPos _feet = ctx.playerFeet();
+            BlockState _desired = bcc.getSchematic(pos.x, pos.y, pos.z, ctx.world().getBlockState(pos));
+            logDirect("[builder:break] " + pos.x + " " + pos.y + " " + pos.z
+                    + " cur=" + ctx.world().getBlockState(pos).getBlock().getDescriptionId()
+                    + " want=" + (_desired == null ? "null" : _desired.getBlock().getDescriptionId())
+                    + " playerY=" + _feet.y + " dy=" + (pos.y - _feet.y)
+                    + " targetY=" + currentTargetY(schematicPrefersTopDown) + " topDown=" + schematicPrefersTopDown
+                    + " incorrectSz=" + (incorrectPositions == null ? -1 : incorrectPositions.size())
+                    + " inIncorrect=" + (incorrectPositions != null && incorrectPositions.contains(pos))
+                    + " looking=" + ctx.isLookingAt(pos));
             baritone.getLookBehavior().updateTarget(rot, true);
             MovementHelper.switchToBestToolFor(ctx, bcc.get(pos));
             if (ctx.player().isCrouching()) {
@@ -554,6 +616,15 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         Optional<Placement> toPlace = searchForPlacables(bcc, desirableOnHotbar);
         if (toPlace.isPresent() && isSafeToCancel && ctx.player().onGround() && ticks <= 0) {
             Rotation rot = toPlace.get().rot;
+            BlockPos _pa = toPlace.get().placeAgainst;
+            BlockPos _placing = _pa.relative(toPlace.get().side);
+            BlockState _placeDesired = bcc.getSchematic(_placing.getX(), _placing.getY(), _placing.getZ(), bcc.bsi.get0(_placing.getX(), _placing.getY(), _placing.getZ()));
+            logDirect("[builder:place] at=" + _placing.getX() + " " + _placing.getY() + " " + _placing.getZ()
+                    + " want=" + (_placeDesired == null ? "null" : _placeDesired.getBlock().getDescriptionId())
+                    + " against=" + _pa.getX() + " " + _pa.getY() + " " + _pa.getZ()
+                    + " side=" + toPlace.get().side
+                    + " playerY=" + ctx.playerFeet().y
+                    + " incorrectSz=" + (incorrectPositions == null ? -1 : incorrectPositions.size()));
             baritone.getLookBehavior().updateTarget(rot, true);
             ctx.player().getInventory().setSelectedSlot(toPlace.get().hotbarSelection);
             baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
@@ -648,7 +719,20 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                             incorrectPositions.remove(pos);
                             observedCompleted.add(BetterBlockPos.longHash(pos));
                         } else {
-                            incorrectPositions.add(pos);
+                            boolean wasCorrect = observedCompleted.contains(BetterBlockPos.longHash(pos));
+                            boolean isNew = incorrectPositions.add(pos);
+                            if (!isNew) {
+                                logDirect("[builder:still-wrong] " + x + " " + y + " " + z
+                                        + " cur=" + bcc.bsi.get0(x, y, z).getBlock().getDescriptionId()
+                                        + " want=" + desired.getBlock().getDescriptionId());
+                            } else if (wasCorrect && schematicPrefersTopDown) {
+                                // Block was previously correct (e.g. air) but is now wrong — something placed it.
+                                // Defer breaking until the rest of this Y layer is cleared.
+                                recentlyPlaced.add(pos);
+                                logDirect("[builder:scaffold] " + x + " " + y + " " + z
+                                        + " cur=" + bcc.bsi.get0(x, y, z).getBlock().getDescriptionId()
+                                        + " (was-correct, now-wrong — deferred)");
+                            }
                             observedCompleted.remove(BetterBlockPos.longHash(pos));
                         }
                     }
@@ -659,7 +743,10 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
     private void fullRecalc(BuilderCalculationContext bcc) {
         incorrectPositions = new HashSet<>();
-        for (int y = 0; y < schematic.heightY(); y++) {
+        int yStart = schematicPrefersTopDown ? schematic.heightY() - 1 : 0;
+        int yEnd   = schematicPrefersTopDown ? -1 : schematic.heightY();
+        int yStep  = schematicPrefersTopDown ? -1 : 1;
+        for (int y = yStart; y != yEnd; y += yStep) {
             for (int z = 0; z < schematic.lengthZ(); z++) {
                 for (int x = 0; x < schematic.widthX(); x++) {
                     int blockX = x + origin.getX();
@@ -701,13 +788,18 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     }
 
     private Goal assemble(BuilderCalculationContext bcc, List<BlockState> approxPlaceable, boolean logMissing) {
+        // Always work one Y layer at a time: bottom-up for building, top-down for clearing.
+        int targetY = currentTargetY(schematicPrefersTopDown);
+
         List<BetterBlockPos> placeable = new ArrayList<>();
         List<BetterBlockPos> breakable = new ArrayList<>();
         List<BetterBlockPos> sourceLiquids = new ArrayList<>();
         List<BetterBlockPos> flowingLiquids = new ArrayList<>();
         Map<BlockState, Integer> missing = new HashMap<>();
         List<BetterBlockPos> outOfBounds = new ArrayList<>();
-        incorrectPositions.forEach(pos -> {
+        incorrectPositions.stream()
+                .filter(pos -> pos.y == targetY)
+                .forEach(pos -> {
             BlockState state = bcc.bsi.get0(pos);
             if (state.getBlock() instanceof AirBlock) {
                 BlockState desired = bcc.getSchematic(pos.x, pos.y, pos.z, state);
@@ -729,7 +821,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                         flowingLiquids.add(pos);
                     }
                 } else {
-                    breakable.add(pos);
+                    if (!recentlyPlaced.contains(pos)) {
+                        breakable.add(pos);
+                    }
                 }
             }
         });
@@ -1037,8 +1131,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         if (!ignoreDirection && ignoredProps.isEmpty()) {
             return first.equals(second); // early return if no properties are being ignored
         }
-        Map<Property<?>, Comparable<?>> map1 = first.getValues();
-        Map<Property<?>, Comparable<?>> map2 = second.getValues();
+        ImmutableMap<Property<?>, Comparable<?>> map1 = first.getValues();
+        ImmutableMap<Property<?>, Comparable<?>> map2 = second.getValues();
         for (Property<?> prop : map1.keySet()) {
             if (map1.get(prop) != map2.get(prop)
                     && !(ignoreDirection && ORIENTATION_PROPS.contains(prop))

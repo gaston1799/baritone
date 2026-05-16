@@ -78,13 +78,13 @@ public final class ChunkPacker {
                         for (int x = 0; x < 16; x++) {
                             int index = CachedChunk.getPositionIndex(x, y, z);
                             BlockState state = bsc.get(x, y1, z);
-                            boolean[] bits = getPathingBlockType(state, chunk, x, y + chunk.getMinY(), z).getBits();
+                            boolean[] bits = getPathingBlockType(state, chunk, x, y + chunk.getLevel().getMinBuildHeight(), z).getBits();
                             bitSet.set(index, bits[0]);
                             bitSet.set(index + 1, bits[1]);
                             Block block = state.getBlock();
                             if (CachedChunk.BLOCKS_TO_KEEP_TRACK_OF.contains(block)) {
                                 String name = BlockUtils.blockToString(block);
-                                specialBlocks.computeIfAbsent(name, b -> new ArrayList<>()).add(new BlockPos(x, y+chunk.getMinY(), z));
+                                specialBlocks.computeIfAbsent(name, b -> new ArrayList<>()).add(new BlockPos(x, y + chunk.getLevel().getMinBuildHeight(), z));
                             }
                         }
                     }
@@ -99,14 +99,14 @@ public final class ChunkPacker {
 
         // get top block in columns
         // @formatter:off
+        outer:
         for (int z = 0; z < 16; z++) {
-            https://www.ibm.com/developerworks/library/j-perry-writing-good-java-code/index.html
             for (int x = 0; x < 16; x++) {
                 for (int y = height - 1; y >= 0; y--) {
                     int index = CachedChunk.getPositionIndex(x, y, z);
                     if (bitSet.get(index) || bitSet.get(index + 1)) {
                         blocks[z << 4 | x] = getFromChunk(chunk, x, y, z);
-                        continue https;
+                        continue outer;
                     }
                 }
                 blocks[z << 4 | x] = Blocks.AIR.defaultBlockState();

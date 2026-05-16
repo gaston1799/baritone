@@ -53,7 +53,16 @@ public class MovementDiagonal extends Movement {
     }
 
     private MovementDiagonal(IBaritone baritone, BetterBlockPos start, BetterBlockPos end, BetterBlockPos dir1, BetterBlockPos dir2) {
-        super(baritone, start, end, new BetterBlockPos[]{dir1, dir1.above(), dir2, dir2.above(), end, end.above()});
+        super(
+                baritone,
+                start,
+                end,
+                concat(
+                        topDownClearance(dir1, MovementHelper.pathingPlayerHeight()),
+                        topDownClearance(dir2, MovementHelper.pathingPlayerHeight()),
+                        topDownClearance(end, MovementHelper.pathingPlayerHeight())
+                )
+        );
     }
 
     @Override
@@ -109,9 +118,11 @@ public class MovementDiagonal extends Movement {
     }
 
     public static void cost(CalculationContext context, int x, int y, int z, int destX, int destZ, MutableMoveResult res) {
-        if (!MovementHelper.canWalkThrough(context, destX, y + 1, destZ)) {
+        int playerHeight = context.playerHeight;
+        if (!MovementHelper.hasVerticalClearance(context, destX, y + 1, destZ, playerHeight - 1)) {
             return;
         }
+        boolean preferLevelSwimming = MovementHelper.prefersLevelSwimming(context, x, y, z, destX, destZ);
         BlockState destInto = context.get(destX, y, destZ);
         BlockState fromDown;
         boolean ascend = false;
@@ -121,7 +132,10 @@ public class MovementDiagonal extends Movement {
         boolean sneaking = false;
         if (!MovementHelper.canWalkThrough(context, destX, y, destZ, destInto)) {
             ascend = true;
-            if (!context.allowDiagonalAscend || !MovementHelper.canWalkThrough(context, x, y + 2, z) || !MovementHelper.canWalkOn(context, destX, y, destZ, destInto) || !MovementHelper.canWalkThrough(context, destX, y + 2, destZ)) {
+            if (!context.allowDiagonalAscend
+                    || !MovementHelper.canWalkThrough(context, x, y + playerHeight, z)
+                    || !MovementHelper.canWalkOn(context, destX, y, destZ, destInto)
+                    || !MovementHelper.canWalkThrough(context, destX, y + playerHeight, destZ)) {
                 return;
             }
             destWalkOn = destInto;
@@ -133,7 +147,9 @@ public class MovementDiagonal extends Movement {
             frostWalker = standingOnABlock && MovementHelper.canUseFrostWalker(context, destWalkOn);
             if (!frostWalker && !MovementHelper.canWalkOn(context, destX, y - 1, destZ, destWalkOn)) {
                 descend = true;
-                if (!context.allowDiagonalDescend || !MovementHelper.canWalkOn(context, destX, y - 2, destZ) || !MovementHelper.canWalkThrough(context, destX, y - 1, destZ, destWalkOn)) {
+                if (!context.allowDiagonalDescend
+                        || !MovementHelper.canWalkOn(context, destX, y - 2, destZ)
+                        || !MovementHelper.hasVerticalClearance(context, destX, y - 1, destZ, playerHeight)) {
                     return;
                 }
             }
@@ -182,22 +198,34 @@ public class MovementDiagonal extends Movement {
             multiplier = context.waterWalkSpeed;
             water = true;
         }
+        if (preferLevelSwimming && (ascend || descend)) {
+            return;
+        }
         BlockState pb0 = context.get(x, y, destZ);
         BlockState pb2 = context.get(destX, y, z);
+        if (water && preferLevelSwimming) {
+            if (!MovementHelper.isSwimmableMovementColumn(context, x, y, destZ)
+                    || !MovementHelper.isSwimmableMovementColumn(context, destX, y, z)) {
+                return;
+            }
+            res.cost = multiplier * SQRT_2 + MovementHelper.underwaterDepthPenalty(context, destX, y, destZ);
+            res.x = destX;
+            res.z = destZ;
+            res.y = y;
+            return;
+        }
         if (ascend) {
-            boolean ATop = MovementHelper.canWalkThrough(context, x, y + 2, destZ);
-            boolean AMid = MovementHelper.canWalkThrough(context, x, y + 1, destZ);
-            boolean ALow = MovementHelper.canWalkThrough(context, x, y, destZ, pb0);
-            boolean BTop = MovementHelper.canWalkThrough(context, destX, y + 2, z);
-            boolean BMid = MovementHelper.canWalkThrough(context, destX, y + 1, z);
-            boolean BLow = MovementHelper.canWalkThrough(context, destX, y, z, pb2);
-            if ((!(ATop && AMid && ALow) && !(BTop && BMid && BLow)) // no option
+            boolean AColumnClear = MovementHelper.hasVerticalClearance(context, x, y, destZ, playerHeight);
+            boolean ATop = MovementHelper.canWalkThrough(context, x, y + playerHeight, destZ);
+            boolean BColumnClear = MovementHelper.hasVerticalClearance(context, destX, y, z, playerHeight);
+            boolean BTop = MovementHelper.canWalkThrough(context, destX, y + playerHeight, z);
+            if ((!(ATop && AColumnClear) && !(BTop && BColumnClear)) // no option
                     || MovementHelper.avoidWalkingInto(pb0) // bad
                     || MovementHelper.avoidWalkingInto(pb2) // bad
-                    || (ATop && AMid && MovementHelper.canWalkOn(context, x, y, destZ, pb0)) // we could just ascend
-                    || (BTop && BMid && MovementHelper.canWalkOn(context, destX, y, z, pb2)) // we could just ascend
-                    || (!ATop && AMid && ALow) // head bonk A
-                    || (!BTop && BMid && BLow)) { // head bonk B
+                    || (AColumnClear && MovementHelper.canWalkOn(context, x, y, destZ, pb0)) // we could just ascend
+                    || (BColumnClear && MovementHelper.canWalkOn(context, destX, y, z, pb2)) // we could just ascend
+                    || (!ATop && AColumnClear) // head bonk A
+                    || (!BTop && BColumnClear)) { // head bonk B
                 return;
             }
             res.cost = multiplier * SQRT_2 + JUMP_ONE_BLOCK_COST;
@@ -206,30 +234,18 @@ public class MovementDiagonal extends Movement {
             res.y = y + 1;
             return;
         }
-        double optionA = MovementHelper.getMiningDurationTicks(context, x, y, destZ, pb0, false);
-        double optionB = MovementHelper.getMiningDurationTicks(context, destX, y, z, pb2, false);
+        double optionA = MovementHelper.getMiningDurationTicksForColumn(context, x, y, destZ, playerHeight);
+        double optionB = MovementHelper.getMiningDurationTicksForColumn(context, destX, y, z, playerHeight);
         if (optionA != 0 && optionB != 0) {
             // check these one at a time -- if pb0 and pb2 were nonzero, we already know that (optionA != 0 && optionB != 0)
             // so no need to check pb1 as well, might as well return early here
             return;
         }
-        BlockState pb1 = context.get(x, y + 1, destZ);
-        optionA += MovementHelper.getMiningDurationTicks(context, x, y + 1, destZ, pb1, true);
-        if (optionA != 0 && optionB != 0) {
-            // same deal, if pb1 makes optionA nonzero and option B already was nonzero, pb3 can't affect the result
-            return;
-        }
-        BlockState pb3 = context.get(destX, y + 1, z);
-        if (optionA == 0 && ((MovementHelper.avoidWalkingInto(pb2) && pb2.getBlock() != Blocks.WATER) || MovementHelper.avoidWalkingInto(pb3))) {
+        if (optionA == 0 && MovementHelper.avoidWalkingInto(context.bsi, destX, y, z, playerHeight, true)) {
             // at this point we're done calculating optionA, so we can check if it's actually possible to edge around in that direction
             return;
         }
-        optionB += MovementHelper.getMiningDurationTicks(context, destX, y + 1, z, pb3, true);
-        if (optionA != 0 && optionB != 0) {
-            // and finally, if the cost is nonzero for both ways to approach this diagonal, it's not possible
-            return;
-        }
-        if (optionB == 0 && ((MovementHelper.avoidWalkingInto(pb0) && pb0.getBlock() != Blocks.WATER) || MovementHelper.avoidWalkingInto(pb1))) {
+        if (optionB == 0 && MovementHelper.avoidWalkingInto(context.bsi, x, y, destZ, playerHeight, true)) {
             // and now that option B is fully calculated, see if we can edge around that way
             return;
         }
@@ -257,6 +273,9 @@ public class MovementDiagonal extends Movement {
         }
         res.x = destX;
         res.z = destZ;
+        if (water) {
+            res.cost += MovementHelper.underwaterDepthPenalty(context, destX, res.y, destZ);
+        }
     }
 
     @Override
@@ -268,7 +287,7 @@ public class MovementDiagonal extends Movement {
 
         if (ctx.playerFeet().equals(dest)) {
             return state.setStatus(MovementStatus.SUCCESS);
-        } else if (!playerInValidPosition() && !(MovementHelper.isLiquid(ctx, src) && getValidPositions().contains(ctx.playerFeet().above()))) {
+        } else if (!playerInValidPosition() && !isRecoverablePosition()) {
             return state.setStatus(MovementStatus.UNREACHABLE);
         }
         if (dest.y > src.y && ctx.player().position().y < src.y + 0.1 && ctx.player().horizontalCollision) {
@@ -286,7 +305,7 @@ public class MovementDiagonal extends Movement {
         if (MovementHelper.isLiquid(ctx, ctx.playerFeet()) && !Baritone.settings().sprintInWater.value) {
             return false;
         }
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < positionsToBreak.length * 2 / 3; i++) {
             if (!MovementHelper.canWalkThrough(ctx, positionsToBreak[i])) {
                 return false;
             }
@@ -299,13 +318,36 @@ public class MovementDiagonal extends Movement {
         return true;
     }
 
+    private boolean isRecoverablePosition() {
+        BetterBlockPos feet = ctx.playerFeet();
+        if (MovementHelper.isLiquid(ctx, src) && getValidPositions().contains(feet.above())) {
+            return true;
+        }
+        double playerX = ctx.player().position().x;
+        double playerY = ctx.player().position().y;
+        double playerZ = ctx.player().position().z;
+        for (BetterBlockPos valid : getValidPositions()) {
+            if (Math.abs(playerY - valid.y) > 1.25D) {
+                continue;
+            }
+            double flatDistance = Math.max(
+                    Math.abs(playerX - (valid.x + 0.5D)),
+                    Math.abs(playerZ - (valid.z + 0.5D))
+            );
+            if (flatDistance <= 0.95D) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     @Override
     public List<BlockPos> toBreak(BlockStateInterface bsi) {
         if (toBreakCached != null) {
             return toBreakCached;
         }
         List<BlockPos> result = new ArrayList<>();
-        for (int i = 4; i < 6; i++) {
+        for (int i = positionsToBreak.length * 2 / 3; i < positionsToBreak.length; i++) {
             if (!MovementHelper.canWalkThrough(bsi, positionsToBreak[i].x, positionsToBreak[i].y, positionsToBreak[i].z)) {
                 result.add(positionsToBreak[i]);
             }
@@ -320,7 +362,7 @@ public class MovementDiagonal extends Movement {
             toWalkIntoCached = new ArrayList<>();
         }
         List<BlockPos> result = new ArrayList<>();
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < positionsToBreak.length * 2 / 3; i++) {
             if (!MovementHelper.canWalkThrough(bsi, positionsToBreak[i].x, positionsToBreak[i].y, positionsToBreak[i].z)) {
                 result.add(positionsToBreak[i]);
             }

@@ -22,12 +22,14 @@ import baritone.api.IBaritone;
 import baritone.api.Settings;
 import baritone.api.command.Command;
 import baritone.api.command.argument.IArgConsumer;
+import baritone.api.command.datatypes.ItemById;
 import baritone.api.command.datatypes.RelativeFile;
 import baritone.api.command.exception.CommandException;
 import baritone.api.command.exception.CommandInvalidStateException;
 import baritone.api.command.exception.CommandInvalidTypeException;
 import baritone.api.command.helpers.Paginator;
 import baritone.api.command.helpers.TabCompleteHelper;
+import baritone.api.utils.TypeUtils;
 import baritone.api.utils.SettingsUtil;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -35,7 +37,11 @@ import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.world.item.Item;
 
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -116,9 +122,15 @@ public class SetCommand extends Command {
             );
             return;
         }
-        args.requireMax(1);
         boolean resetting = arg.equalsIgnoreCase("reset");
         boolean toggling = arg.equalsIgnoreCase("toggle");
+        boolean adding = arg.equalsIgnoreCase("add");
+        boolean removing = arg.equalsIgnoreCase("remove");
+        if (adding || removing) {
+            handleListMutation(args, adding);
+            return;
+        }
+        args.requireMax(1);
         boolean doingSomething = resetting || toggling;
         if (resetting) {
             if (!args.hasAny()) {
@@ -205,6 +217,49 @@ public class SetCommand extends Command {
         SettingsUtil.save(Baritone.settings());
     }
 
+    @SuppressWarnings("unchecked")
+    private void handleListMutation(IArgConsumer args, boolean add) throws CommandException {
+        args.requireMin(2);
+        String settingName = args.getString();
+        Settings.Setting<?> setting = Baritone.settings().allSettings.stream()
+                .filter(s -> s.getName().equalsIgnoreCase(settingName))
+                .findFirst()
+                .orElse(null);
+        if (setting == null) {
+            throw new CommandInvalidTypeException(args.consumed(), "a valid setting");
+        }
+        if (setting.isJavaOnly()) {
+            throw new CommandInvalidStateException(String.format("Setting %s can only be used via the api.", setting.getName()));
+        }
+        if (!isItemListSetting(setting)) {
+            throw new CommandInvalidTypeException(args.consumed(), "a List<Item> setting");
+        }
+        Item item = args.getDatatypeFor(ItemById.INSTANCE);
+        args.requireMax(0);
+        Settings.Setting<List<Item>> itemListSetting = (Settings.Setting<List<Item>>) setting;
+        List<Item> updated = new ArrayList<>(itemListSetting.value);
+        boolean changed = add ? !updated.contains(item) && updated.add(item) : updated.remove(item);
+        itemListSetting.value = updated;
+        SettingsUtil.save(Baritone.settings());
+        logDirect(String.format(
+                "%s %s %s %s",
+                changed ? "Successfully" : "No change:",
+                add ? "added" : "removed",
+                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item),
+                add ? "to " + setting.getName() : "from " + setting.getName()
+        ));
+        logDirect(settingValueToString(setting));
+    }
+
+    private static boolean isItemListSetting(Settings.Setting<?> setting) {
+        Type type = setting.getType();
+        if (!(type instanceof ParameterizedType) || !List.class.isAssignableFrom(TypeUtils.resolveBaseClass(type))) {
+            return false;
+        }
+        Type elementType = ((ParameterizedType) type).getActualTypeArguments()[0];
+        return TypeUtils.resolveBaseClass(elementType) == Item.class;
+    }
+
     @Override
     public Stream<String> tabComplete(String label, IArgConsumer args) throws CommandException {
         if (args.hasAny()) {
@@ -221,6 +276,12 @@ public class SetCommand extends Command {
                             .addToggleableSettings()
                             .filterPrefix(args.getString())
                             .stream();
+                } else if (arg.equalsIgnoreCase("add") || arg.equalsIgnoreCase("remove")) {
+                    String prefix = args.getString().toLowerCase(Locale.US);
+                    return Baritone.settings().allSettings.stream()
+                            .filter(SetCommand::isItemListSetting)
+                            .map(Settings.Setting::getName)
+                            .filter(name -> name.toLowerCase(Locale.US).startsWith(prefix));
                 } else if (Arrays.asList("ld", "load").contains(arg.toLowerCase(Locale.US))) {
                     // settings always use the directory of the main Minecraft instance
                     return RelativeFile.tabComplete(args, Minecraft.getInstance().gameDirectory.toPath().resolve("baritone").toFile());
@@ -235,6 +296,12 @@ public class SetCommand extends Command {
                             helper.append("false", "true");
                         }
                         return helper.filterPrefix(args.getString()).stream();
+                    } else if (TypeUtils.resolveBaseClass(setting.getType()).isEnum()) {
+                        Class<?> enumClass = TypeUtils.resolveBaseClass(setting.getType());
+                        String prefix = args.getString().toLowerCase(Locale.US);
+                        return Arrays.stream(enumClass.getEnumConstants())
+                                .map(Object::toString)
+                                .filter(value -> value.toLowerCase(Locale.US).startsWith(prefix));
                     } else {
                         return Stream.of(settingValueToString(setting));
                     }
@@ -243,7 +310,7 @@ public class SetCommand extends Command {
                 return new TabCompleteHelper()
                         .addSettings()
                         .sortAlphabetically()
-                        .prepend("list", "modified", "reset", "toggle", "save", "load")
+                        .prepend("list", "modified", "reset", "toggle", "add", "remove", "save", "load")
                         .filterPrefix(arg)
                         .stream();
             }
@@ -267,6 +334,8 @@ public class SetCommand extends Command {
                 "> set modified [page] - View modified settings",
                 "> set <setting> - View the current value of a setting",
                 "> set <setting> <value> - Set the value of a setting",
+                "> set add <item-list-setting> <item> - Add one item to a List<Item> setting",
+                "> set remove <item-list-setting> <item> - Remove one item from a List<Item> setting",
                 "> set reset all - Reset ALL SETTINGS to their defaults",
                 "> set reset <setting> - Reset a setting to its default",
                 "> set toggle <setting> - Toggle a boolean setting",

@@ -247,7 +247,10 @@ public class SettingsUtil {
         ),
         ITEM(
             Item.class,
-                str -> BuiltInRegistries.ITEM.get(ResourceLocation.parse(str.trim())).map(Holder.Reference::value).orElse(null),
+                str -> {
+                    ResourceLocation id = ResourceLocation.tryParse(str.trim());
+                    return id == null ? null : BuiltInRegistries.ITEM.getOptional(id).orElse(null);
+                },
                 item -> BuiltInRegistries.ITEM.getKey(item).toString()
         ),
         LIST() {

@@ -40,13 +40,14 @@ Commands in Baritone:
 - `goal clear` to clear the goal
 - `cancel` or `stop` to stop everything, `forcecancel` is also an option
 - `goto portal` or `goto ender_chest` or `goto block_type` to go to a block. (in Impact, `.goto` is an alias for `.b goto` for the most part)
-- `mine diamond_ore iron_ore` to mine diamond ore or iron ore (turn on the setting `legitMine` to only mine ores that it can actually see. It will explore randomly around y=11 until it finds them.) An amount of blocks can also be specified, for example, `mine 64 diamond_ore`.
+- `mine diamond_ore iron_ore` to mine diamond ore or iron ore (turn on the setting `legitMine` to only mine ores that it can actually see. It will explore randomly around y=11 until it finds them.) An amount of blocks can also be specified, for example, `mine 64 diamond_ore`. Grouped presets are also supported, for example `mine logs` or the direct shorthand `logs` to mine all log and stem types without picking a specific wood first.
+- `craft diamond_sword` to print the dependency tree, show the next actionable step, and then automate the recursive gather/craft chain. `craft diamond_sword 2` does the same for a target count. Craft automation uses ore-aware mining delegation: ores still respect `legitMine`, while non-ore craft materials such as logs use normal cached/scanned mining even when `legitMine` is enabled.
 - `click` to click your destination on the screen. Right click path to on top of the block, left click to path into it (either at foot level or eye level), and left click and drag to select an area (`#help sel` to see what you can do with that selection).
 - `follow player playerName` to follow a player. `follow players` to follow any players in range (combine with Kill Aura for a fun time). `follow entities` to follow any entities. `follow entity pig` to follow entities of a specific type.
 - `wp` for waypoints. A "tag" is like "home" (created automatically on right clicking a bed) or "death" (created automatically on death) or "user" (has to be created manually). So you might want `#wp save user coolbiome`, then to set the goal `#wp goal coolbiome` then `#path` to path to it. For death, `#wp goal death` will list waypoints under the "death" tag (remember stuff is clickable!)
 - `build` to build a schematic. `build blah.schematic` will load `schematics/blah.schematic` and build it with the origin being your player feet. `build blah.schematic x y z` to set the origin. Any of those can be relative to your player (`~ 69 ~-420` would build at x=player x, y=69, z=player z-420).
 - `schematica` to build the schematic that is currently open in schematica
-- `tunnel` to dig and make a tunnel, 1x2. It will only deviate from the straight line if necessary such as to avoid lava. For a dumber tunnel that is really just cleararea, you can `tunnel 3 2 100`, to clear an area 3 high, 2 wide, and 100 deep.
+- `tunnel` to dig and make a tunnel, 1x2. It will only deviate from the straight line if necessary such as to avoid lava. For a dumber tunnel that is really just cleararea, you can `tunnel 3 2 100`, to clear an area 3 high, 2 wide, and 100 deep. If your actual player hitbox is 1 block tall and you set `playerHeight 1`, `tunnel 1 1 <depth>` is also supported.
 - `farm` to automatically harvest, replant, or bone meal crops. Use `farm <range>` or `farm <range> <waypoint>` to limit the max distance from the starting point or a waypoint. 
 - `axis` to go to an axis or diagonal axis at y=120 (`axisHeight` is a configurable setting, defaults to 120).
 - `explore x z` to explore the world from the origin of x,z. Leave out x and z to default to player feet. This will continually path towards the closest chunk to the origin that it's never seen before. `explorefilter filter.json` with optional invert can be used to load in a list of chunks to load.
@@ -61,6 +62,11 @@ Commands in Baritone:
 - `reloadall` to reload Baritone's world cache or `saveall` to save Baritone's world cache.
 - `find` to search through Baritone's cache and attempt to find the location of the block.
 - `surface` or `top` to tell Baritone to head towards the closest surface-like area, this can be the surface or highest available air space.
+- `fill x1 y1 z1 x2 y2 z2 <block>` to fill a rectangular region with a block. Supports relative coordinates (`~`). Use `fill ~ ~ ~ ~10 ~5 ~10 stone` to fill a region from your feet. Use `fill ... air` to clear / break all blocks in a region without a dedicated break command.
+- `outline x1 y1 z1 x2 y2 z2 <block>` to build only the outer shell (walls, floor, ceiling) of a bounding box, leaving the interior completely untouched. Same coordinate format as `fill`. Useful for rooms and hollow structures.
+- `branchmine` to dig a branch mine pattern from your current position in the direction you are facing. Side branches are cut perpendicular at regular intervals. Optionally pass `branchmine <mainLength> <sideLength> <spacing>` to override the defaults. Settings: `branchMineMainLength`, `branchMineSideLength`, `branchMineSpacing`, `branchMineTargetY`.
+- `stripmine` to dig parallel corridors in the direction you are facing. Corridors are spaced `stripMineSpacing` blocks apart (default 3, meaning 2 blocks of uncut wall between each) which exposes every ore between them. Pass `stripmine <length> <corridors>` to override defaults. When the inventory fills and a deposit is configured, the bot paths to the deposit location and shift-clicks items into storage containers whose contents already include that item type — a chest pre-seeded with iron ore gets iron, a diamond chest gets diamonds, etc. Use `stripmine setdeposit` to save your current position as the deposit. Use `stripmine setjunk` to designate a junk chest: after visiting all ore chests, any block-item (cobblestone, andesite, tuff, etc.) not already matched by an ore chest is dumped there. Settings: `stripMineLength`, `stripMineCorridors`, `stripMineSpacing`, `stripMineTargetY`, `stripmineInventoryFreeSlots`.
+- `net host [port]` to open a TCP server (default port 11111) so this instance becomes master. `net connect <ip> [port]` to join as a worker. `net send <command>` to broadcast any Baritone command to all connected workers simultaneously. `net list` / `net stop` to inspect or shut down the connection. Useful for controlling multiple Minecraft clients over LAN or WAN.
 - `version` to get the version of Baritone you're running
 - `damn` daniel
 
@@ -69,9 +75,15 @@ All the settings and documentation are <a href="https://github.com/cabaletta/bar
 There are about a hundred settings, but here are some fun / interesting / important ones that you might want to look at changing in normal usage of Baritone. The documentation for each can be found at the above links.
 - `allowBreak`
 - `allowSprint`
+- `allowSprintJump`
+- `selfDefence`
+- `attackType` (`swordSweep`, `swordJump`, `axeJump`)
+- `selfDefenceMode` (`inPlace`, `shortChase`, `fullChase`)
 - `allowPlace`
 - `allowParkour`
 - `allowParkourPlace`
+- `allowIceParkour`
+- `parkourTakeoffTiming` (`vanilla`, `dynamic`, `jam`, `headHitter`, `late`)
 - `blockPlacementPenalty`
 - `renderCachedChunks` (and `cachedChunksOpacity`) <-- very fun but you need a beefy computer
 - `avoidance` (avoidance of mobs / mob spawners)
@@ -84,7 +96,15 @@ There are about a hundred settings, but here are some fun / interesting / import
 - `acceptableThrowawayItems`
 - `blocksToAvoidBreaking`
 - `mineScanDroppedItems`
+- `veinMine` (expand ore targets to the full connected vein automatically)
+- `silkTouchBlocks` (blocks that autoTool will prefer a Silk Touch tool for, e.g. glass, ice)
 - `allowDiagonalAscend`
+- `swimDeadband` (for example `#swimDeadband 0.3`)
+- `autoEat` / `autoEatAtHunger` (automatically eat food from inventory when hungry)
+- `autoArmor` (automatically equip the best armor from inventory)
+- `autoTotem` / `autoTotemHealth` (move a totem of undying to offhand when health is low)
+- `dropTrashItems` / `trashItems` (automatically drop junk items like tuff or rotten flesh)
+- `autoRespawn` / `autoRespawnTimeoutMs` (automatically click respawn after dying; default timeout is 4000 ms)
 
 
 

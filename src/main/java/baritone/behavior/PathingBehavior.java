@@ -71,6 +71,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     private final Object pathPlanLock = new Object();
 
     private boolean lastAutoJump;
+    private int sprintStateLatchTicks;
 
     private BetterBlockPos expectedSegmentStart;
 
@@ -111,19 +112,29 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
 
     @Override
     public void onPlayerSprintState(SprintStateEvent event) {
-        if (isPathing()) {
-            event.setState(current.isSprinting());
+        if (current != null && !pausedThisTick) {
+            boolean sprinting = current.isSprinting();
+            if (sprinting) {
+                sprintStateLatchTicks = 10;
+            }
+            event.setState(sprinting);
+        } else if (sprintStateLatchTicks > 0 && inProgress != null && goal != null) {
+            event.setState(true);
         }
     }
 
     private void tickPath() {
         pausedThisTick = false;
+        if (sprintStateLatchTicks > 0) {
+            sprintStateLatchTicks--;
+        }
         if (pauseRequestedLastTick && safeToCancel) {
             pauseRequestedLastTick = false;
             if (unpausedLastTick) {
                 baritone.getInputOverrideHandler().clearAllKeys();
                 baritone.getInputOverrideHandler().getBlockBreakHelper().stopBreakingBlock();
             }
+            sprintStateLatchTicks = 0;
             unpausedLastTick = false;
             pausedThisTick = true;
             return;
@@ -154,9 +165,13 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
             }
             safeToCancel = current.onTick();
             if (current.failed() || current.finished()) {
+                if (current.isSprinting()) {
+                    sprintStateLatchTicks = 10;
+                }
                 current = null;
                 if (goal == null || goal.isInGoal(ctx.playerFeet())) {
                     logDebug("All done. At " + goal);
+                    sprintStateLatchTicks = 0;
                     queuePathEvent(PathEvent.AT_GOAL);
                     next = null;
                     if (Baritone.settings().disconnectOnArrival.value) {
@@ -362,6 +377,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     public void secretInternalSegmentCancel() {
         queuePathEvent(PathEvent.CANCELED);
         synchronized (pathPlanLock) {
+            sprintStateLatchTicks = 0;
             getInProgress().ifPresent(AbstractNodeCostSearch::cancel);
             if (current != null) {
                 current = null;
@@ -426,6 +442,10 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
      */
     public BetterBlockPos pathStart() { // TODO move to a helper or util class
         BetterBlockPos feet = ctx.playerFeet();
+        BetterBlockPos submergedWaterStart = submergedWaterPathStart(feet);
+        if (submergedWaterStart != null) {
+            return submergedWaterStart;
+        }
         if (!MovementHelper.canWalkOn(ctx, feet.below())) {
             if (ctx.player().onGround()) {
                 double playerX = ctx.player().position().x;
@@ -445,7 +465,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
                         // can't possibly be sneaking off of this one, we're too far away
                         continue;
                     }
-                    if (MovementHelper.canWalkOn(ctx, possibleSupport.below()) && MovementHelper.canWalkThrough(ctx, possibleSupport) && MovementHelper.canWalkThrough(ctx, possibleSupport.above())) {
+                    if (MovementHelper.canWalkOn(ctx, possibleSupport.below()) && MovementHelper.hasPlayerClearance(ctx, possibleSupport)) {
                         // this is plausible
                         //logDebug("Faking path start assuming player is standing off the edge of a block");
                         return possibleSupport;
@@ -462,6 +482,35 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
             }
         }
         return feet;
+    }
+
+    private BetterBlockPos submergedWaterPathStart(BetterBlockPos feet) {
+        if (Baritone.settings().assumeWalkOnWater.value || ctx.player() == null || !ctx.player().isInWater()) {
+            return null;
+        }
+        BetterBlockPos best = null;
+        for (int offset = 0; offset <= MovementHelper.pathingPlayerHeight() + 1; offset++) {
+            BetterBlockPos candidate = feet.below(offset);
+            if (isValidWaterPathStart(candidate)) {
+                best = candidate;
+                break;
+            }
+        }
+        if (best == null) {
+            return null;
+        }
+        while (isValidWaterPathStart(best.above())) {
+            best = best.above();
+        }
+        return best;
+    }
+
+    private boolean isValidWaterPathStart(BetterBlockPos candidate) {
+        BetterBlockPos support = candidate.below();
+        if (!MovementHelper.canWalkOn(ctx, support) || !MovementHelper.hasPlayerClearance(ctx, candidate)) {
+            return false;
+        }
+        return MovementHelper.isWater(ctx, candidate) || MovementHelper.isWater(ctx, support);
     }
 
     /**

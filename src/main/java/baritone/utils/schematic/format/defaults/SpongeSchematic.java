@@ -110,16 +110,17 @@ public final class SpongeSchematic extends StaticSchematic {
         private BlockState deserialize() {
             if (this.blockState == null) {
                 Block block = BuiltInRegistries.BLOCK.get(this.resourceLocation)
-                    .map(Holder.Reference::value)
-                    .orElse(Blocks.AIR);
+                    ;
+                if (block == null || block == Blocks.AIR && !BuiltInRegistries.BLOCK.containsKey(this.resourceLocation)) {
+                    block = Blocks.AIR;
+                }
                 this.blockState = block.defaultBlockState();
-
-                this.properties.keySet().stream().sorted(String::compareTo).forEachOrdered(key -> {
+                for (String key : this.properties.keySet().stream().sorted(String::compareTo).toList()) {
                     Property<?> property = block.getStateDefinition().getProperty(key);
                     if (property != null) {
                         this.blockState = setPropertyValue(this.blockState, property, this.properties.get(key));
                     }
-                });
+                }
             }
             return this.blockState;
         }
@@ -134,7 +135,10 @@ public final class SpongeSchematic extends StaticSchematic {
                 String location = m.group("location");
                 String properties = m.group("properties");
 
-                ResourceLocation resourceLocation = ResourceLocation.parse(location);
+                ResourceLocation resourceLocation = ResourceLocation.tryParse(location);
+                if (resourceLocation == null) {
+                    throw new IllegalArgumentException("Invalid block id in schematic palette: " + location);
+                }
                 Map<String, String> propertiesMap = new HashMap<>();
                 if (properties != null) {
                     for (String property : properties.split(",")) {

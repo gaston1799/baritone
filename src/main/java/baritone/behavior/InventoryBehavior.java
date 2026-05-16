@@ -20,19 +20,29 @@ package baritone.behavior;
 import baritone.Baritone;
 import baritone.api.event.events.TickEvent;
 import baritone.api.utils.Helper;
+import baritone.api.utils.input.Input;
+import baritone.pathing.movement.MovementHelper;
 import baritone.utils.ToolSet;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.DeathScreen;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.item.ArmorItem;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.PickaxeItem;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
+import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -46,8 +56,17 @@ import java.util.function.Predicate;
 
 public final class InventoryBehavior extends Behavior implements Helper {
 
+    private static final EquipmentSlot[] ARMOR_EQUIPMENT_SLOTS = new EquipmentSlot[] {
+            EquipmentSlot.HEAD,
+            EquipmentSlot.CHEST,
+            EquipmentSlot.LEGS,
+            EquipmentSlot.FEET
+    };
+
     int ticksSinceLastInventoryMove;
     int[] lastTickRequestedMove; // not everything asks every tick, so remember the request while coming to a halt
+    private boolean autoEatHoldingUse;
+    private long deathTime = -1L;
 
     public InventoryBehavior(Baritone baritone) {
         super(baritone);
@@ -55,7 +74,20 @@ public final class InventoryBehavior extends Behavior implements Helper {
 
     @Override
     public void onTick(TickEvent event) {
+        if (Baritone.settings().autoRespawn.value && event.getType() == TickEvent.Type.IN) {
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.screen instanceof DeathScreen && mc.player != null) {
+                if (deathTime < 0) deathTime = System.currentTimeMillis();
+                if (System.currentTimeMillis() - deathTime >= Baritone.settings().autoRespawnTimeoutMs.value) {
+                    mc.player.respawn();
+                    deathTime = -1;
+                }
+                return;
+            }
+            deathTime = -1;
+        }
         if (!Baritone.settings().allowInventory.value) {
+            stopAutoEatUse();
             return;
         }
         if (event.getType() == TickEvent.Type.OUT) {
@@ -63,9 +95,33 @@ public final class InventoryBehavior extends Behavior implements Helper {
         }
         if (ctx.player().containerMenu != ctx.player().inventoryMenu) {
             // we have a crafting table or a chest or something open
+            stopAutoEatUse();
             return;
         }
         ticksSinceLastInventoryMove++;
+        if (lastTickRequestedMove != null) {
+            logDebug("Remembering to move " + lastTickRequestedMove[0] + " " + lastTickRequestedMove[1] + " from a previous tick");
+            requestSwapWithHotBar(lastTickRequestedMove[0], lastTickRequestedMove[1]);
+            return;
+        }
+        if (autoEat()) {
+            return;
+        }
+        if (autoTotem()) {
+            return;
+        }
+        if (autoArmor()) {
+            return;
+        }
+        if (dropTrashItems()) {
+            return;
+        }
+        if (dropExcessAcceptableThrowawayItems()) {
+            return;
+        }
+        if (isAutoEating()) {
+            return;
+        }
         if (firstValidThrowaway() >= 9) { // aka there are none on the hotbar, but there are some in main inventory
             requestSwapWithHotBar(firstValidThrowaway(), 8);
         }
@@ -73,20 +129,306 @@ public final class InventoryBehavior extends Behavior implements Helper {
         if (pick >= 9) {
             requestSwapWithHotBar(pick, 0);
         }
-        if (lastTickRequestedMove != null) {
-            logDebug("Remembering to move " + lastTickRequestedMove[0] + " " + lastTickRequestedMove[1] + " from a previous tick");
-            requestSwapWithHotBar(lastTickRequestedMove[0], lastTickRequestedMove[1]);
+    }
+
+    private boolean autoEat() {
+        if (!Baritone.settings().autoEat.value) {
+            stopAutoEatUse();
+            return false;
+        }
+        LocalPlayer player = ctx.player();
+        int threshold = Math.max(0, Math.min(20, Baritone.settings().autoEatAtHunger.value));
+        int targetHunger = autoEatTargetHunger(player, threshold);
+        if (targetHunger <= player.getFoodData().getFoodLevel() && !player.isUsingItem()) {
+            stopAutoEatUse();
+            return false;
+        }
+        if (!player.canEat(false) && !player.isUsingItem()) {
+            stopAutoEatUse();
+            return false;
+        }
+        if (!player.isUsingItem() && !selectBestFood(targetHunger)) {
+            stopAutoEatUse();
+            return false;
+        }
+        if (player.isUsingItem() && !isSelectedFood(player)) {
+            stopAutoEatUse();
+            return false;
+        }
+        baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_LEFT, false);
+        baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, false);
+        ctx.minecraft().options.keyUse.setDown(true);
+        autoEatHoldingUse = true;
+        if (!player.isUsingItem()) {
+            ctx.playerController().syncHeldItem();
+            ctx.playerController().processRightClick(player, ctx.world(), InteractionHand.MAIN_HAND);
+        }
+        return true;
+    }
+
+    public boolean isAutoEating() {
+        return autoEatHoldingUse || (ctx.player() != null && MovementHelper.isConsumingItem(ctx));
+    }
+
+    private boolean autoTotem() {
+        if (!Baritone.settings().autoTotem.value) {
+            return false;
+        }
+        if (ctx.player().getHealth() > Baritone.settings().autoTotemHealth.value) {
+            return false;
+        }
+        ItemStack offhand = ctx.player().getItemBySlot(EquipmentSlot.OFFHAND);
+        if (offhand.getItem() == Items.TOTEM_OF_UNDYING) {
+            return false;
+        }
+        if (ticksSinceLastInventoryMove < Baritone.settings().ticksBetweenInventoryMoves.value) {
+            return false;
+        }
+        if (Baritone.settings().inventoryMoveOnlyIfStationary.value && !baritone.getInventoryPauserProcess().stationaryForInventoryMove()) {
+            return false;
+        }
+        NonNullList<ItemStack> invy = ctx.player().getInventory().items;
+        int totemSlot = -1;
+        for (int i = 0; i < invy.size(); i++) {
+            if (invy.get(i).getItem() == Items.TOTEM_OF_UNDYING) {
+                totemSlot = i;
+                break;
+            }
+        }
+        if (totemSlot == -1) {
+            return false;
+        }
+        int sourceSlot = totemSlot < 9 ? totemSlot + 36 : totemSlot;
+        int containerId = ctx.player().inventoryMenu.containerId;
+        ctx.playerController().windowClick(containerId, sourceSlot, 0, ClickType.PICKUP, ctx.player());
+        ctx.playerController().windowClick(containerId, 45, 0, ClickType.PICKUP, ctx.player());
+        ctx.playerController().windowClick(containerId, sourceSlot, 0, ClickType.PICKUP, ctx.player());
+        ticksSinceLastInventoryMove = 0;
+        return true;
+    }
+
+    private boolean autoArmor() {
+        if (!Baritone.settings().autoArmor.value || isAutoEating()) {
+            return false;
+        }
+        if (ticksSinceLastInventoryMove < Baritone.settings().ticksBetweenInventoryMoves.value) {
+            return false;
+        }
+        if (Baritone.settings().inventoryMoveOnlyIfStationary.value && !baritone.getInventoryPauserProcess().stationaryForInventoryMove()) {
+            return false;
+        }
+        NonNullList<ItemStack> invy = ctx.player().getInventory().items;
+        for (EquipmentSlot slot : ARMOR_EQUIPMENT_SLOTS) {
+            int bestInventorySlot = bestArmorForSlot(invy, slot);
+            if (bestInventorySlot == -1) {
+                continue;
+            }
+            ItemStack candidate = invy.get(bestInventorySlot);
+            ItemStack equipped = ctx.player().getItemBySlot(slot);
+            if (armorScore(candidate) > armorScore(equipped) + 0.01D) {
+                equipArmorFromInventory(bestInventorySlot, slot);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private int bestArmorForSlot(NonNullList<ItemStack> invy, EquipmentSlot slot) {
+        int bestSlot = -1;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (int i = 0; i < invy.size(); i++) {
+            ItemStack stack = invy.get(i);
+            if (!isArmorForSlot(stack, slot)) {
+                continue;
+            }
+            if (Baritone.settings().itemSaver.value && stack.getMaxDamage() > 1
+                    && stack.getDamageValue() + Baritone.settings().itemSaverThreshold.value >= stack.getMaxDamage()) {
+                continue;
+            }
+            double score = armorScore(stack);
+            if (score > bestScore) {
+                bestScore = score;
+                bestSlot = i;
+            }
+        }
+        return bestSlot;
+    }
+
+    private boolean isArmorForSlot(ItemStack stack, EquipmentSlot slot) {
+        return !stack.isEmpty()
+                && stack.getItem() instanceof ArmorItem
+                && ((ArmorItem) stack.getItem()).getEquipmentSlot() == slot;
+    }
+
+    private double armorScore(ItemStack stack) {
+        if (stack.isEmpty() || !(stack.getItem() instanceof ArmorItem)) {
+            return 0.0D;
+        }
+        ArmorItem armor = (ArmorItem) stack.getItem();
+        int protection = EnchantmentHelper.getItemEnchantmentLevel(Enchantments.ALL_DAMAGE_PROTECTION, stack);
+        return armor.getDefense()
+                + (armor.getToughness() * 0.5D)
+                + (protection * 1.5D);
+    }
+
+    private void equipArmorFromInventory(int inventorySlot, EquipmentSlot armorSlot) {
+        int sourceSlot = inventorySlot < 9 ? inventorySlot + 36 : inventorySlot;
+        int targetSlot = armorMenuSlot(armorSlot);
+        int containerId = ctx.player().inventoryMenu.containerId;
+        ctx.playerController().windowClick(containerId, sourceSlot, 0, ClickType.PICKUP, ctx.player());
+        ctx.playerController().windowClick(containerId, targetSlot, 0, ClickType.PICKUP, ctx.player());
+        ctx.playerController().windowClick(containerId, sourceSlot, 0, ClickType.PICKUP, ctx.player());
+        ticksSinceLastInventoryMove = 0;
+    }
+
+    private int armorMenuSlot(EquipmentSlot slot) {
+        switch (slot) {
+            case HEAD:
+                return 5;
+            case CHEST:
+                return 6;
+            case LEGS:
+                return 7;
+            case FEET:
+                return 8;
+            default:
+                throw new IllegalArgumentException("Not an armor slot: " + slot);
+        }
+    }
+
+    private int autoEatTargetHunger(LocalPlayer player, int threshold) {
+        int hunger = player.getFoodData().getFoodLevel();
+        int target = hunger <= threshold ? 20 : hunger;
+        if (Baritone.settings().autoEatForHealth.value && player.getHealth() < player.getMaxHealth()) {
+            int regenHunger = Math.max(0, Math.min(20, Baritone.settings().autoEatRegenHunger.value));
+            if (hunger < regenHunger) {
+                target = Math.max(target, regenHunger);
+            }
+            if (player.canEat(false)) {
+                target = Math.max(target, hunger + 1);
+            }
+        }
+        return target;
+    }
+
+    private void stopAutoEatUse() {
+        if (!autoEatHoldingUse) {
+            return;
+        }
+        ctx.minecraft().options.keyUse.setDown(false);
+        autoEatHoldingUse = false;
+    }
+
+    private boolean isSelectedFood(LocalPlayer player) {
+        ItemStack selected = player.getInventory().getSelected();
+        return isAutoEatFood(selected);
+    }
+
+    private boolean isAutoEatFood(ItemStack stack) {
+        if (stack.isEmpty() || !stack.isEdible()) {
+            return false;
+        }
+        if ((stack.getItem() == Items.GOLDEN_APPLE || stack.getItem() == Items.ENCHANTED_GOLDEN_APPLE)
+                && ctx.player().getHealth() >= Baritone.settings().autoEatGoldenAppleHealth.value) {
+            return false;
+        }
+        return !Baritone.settings().dropTrashItems.value || !Baritone.settings().trashItems.value.contains(stack.getItem());
+    }
+
+    private boolean selectBestFood(int targetHunger) {
+        LocalPlayer player = ctx.player();
+        NonNullList<ItemStack> invy = player.getInventory().items;
+        FoodChoice best = null;
+        int missingHunger = Math.max(1, targetHunger - player.getFoodData().getFoodLevel());
+        boolean conserve = Baritone.settings().autoEatConserveFood.value
+                && player.getHealth() < player.getMaxHealth()
+                && missingHunger > 0;
+        int highestNutrition = 0;
+        for (int i = 0; i < invy.size(); i++) {
+            ItemStack stack = invy.get(i);
+            if (!isAutoEatFood(stack)) {
+                continue;
+            }
+            FoodProperties food = stack.getItem().getFoodProperties();
+            if (food == null) {
+                continue;
+            }
+            highestNutrition = Math.max(highestNutrition, food.getNutrition());
+        }
+        for (int i = 0; i < invy.size(); i++) {
+            ItemStack stack = invy.get(i);
+            if (!isAutoEatFood(stack)) {
+                continue;
+            }
+            FoodProperties food = stack.getItem().getFoodProperties();
+            if (food == null) {
+                continue;
+            }
+            FoodChoice candidate = new FoodChoice(i, food);
+            if (best == null || betterFood(candidate, best, conserve && missingHunger < highestNutrition, missingHunger)) {
+                best = candidate;
+            }
+        }
+        if (best == null) {
+            return false;
+        }
+        if (best.slot < 9) {
+            player.getInventory().selected = best.slot;
+            ctx.playerController().syncHeldItem();
+            return true;
+        }
+        OptionalInt hotbarSlot = attemptToPutOnHotbarAndGetSlot(best.slot, slot -> slot == 0 || slot == 8);
+        if (hotbarSlot.isEmpty()) {
+            return false;
+        }
+        player.getInventory().selected = hotbarSlot.getAsInt();
+        ctx.playerController().syncHeldItem();
+        return true;
+    }
+
+    private boolean betterFood(FoodChoice candidate, FoodChoice best, boolean conserve, int missingHunger) {
+        if (conserve) {
+            boolean candidateFills = candidate.nutrition >= missingHunger;
+            boolean bestFills = best.nutrition >= missingHunger;
+            if (candidateFills != bestFills) {
+                return candidateFills;
+            }
+            if (candidateFills && candidate.nutrition != best.nutrition) {
+                return candidate.nutrition < best.nutrition;
+            }
+            if (!candidateFills && candidate.nutrition != best.nutrition) {
+                return candidate.nutrition > best.nutrition;
+            }
+        } else if (candidate.nutrition != best.nutrition) {
+            return candidate.nutrition > best.nutrition;
+        }
+        return candidate.saturation > best.saturation;
+    }
+
+    private static final class FoodChoice {
+        final int slot;
+        final int nutrition;
+        final float saturation;
+
+        FoodChoice(int slot, FoodProperties food) {
+            this.slot = slot;
+            this.nutrition = food.getNutrition();
+            this.saturation = food.getSaturationModifier();
         }
     }
 
     public boolean attemptToPutOnHotbar(int inMainInvy, Predicate<Integer> disallowedHotbar) {
+        return attemptToPutOnHotbarAndGetSlot(inMainInvy, disallowedHotbar).isPresent();
+    }
+
+    public OptionalInt attemptToPutOnHotbarAndGetSlot(int inMainInvy, Predicate<Integer> disallowedHotbar) {
         OptionalInt destination = getTempHotbarSlot(disallowedHotbar);
         if (destination.isPresent()) {
             if (!requestSwapWithHotBar(inMainInvy, destination.getAsInt())) {
-                return false;
+                return OptionalInt.empty();
             }
         }
-        return true;
+        return destination;
     }
 
     public OptionalInt getTempHotbarSlot(Predicate<Integer> disallowedHotbar) {
@@ -124,6 +466,81 @@ public final class InventoryBehavior extends Behavior implements Helper {
         ticksSinceLastInventoryMove = 0;
         lastTickRequestedMove = null;
         return true;
+    }
+
+    private boolean requestThrowFromInventory(int inventorySlot, boolean entireStack) {
+        if (ticksSinceLastInventoryMove < Baritone.settings().ticksBetweenInventoryMoves.value) {
+            return false;
+        }
+        if (Baritone.settings().inventoryMoveOnlyIfStationary.value && !baritone.getInventoryPauserProcess().stationaryForInventoryMove()) {
+            return false;
+        }
+        ctx.playerController().windowClick(ctx.player().inventoryMenu.containerId, inventorySlot < 9 ? inventorySlot + 36 : inventorySlot, entireStack ? 1 : 0, ClickType.THROW, ctx.player());
+        ticksSinceLastInventoryMove = 0;
+        return true;
+    }
+
+    private boolean dropTrashItems() {
+        if (!Baritone.settings().dropTrashItems.value) {
+            return false;
+        }
+        NonNullList<ItemStack> invy = ctx.player().getInventory().items;
+        for (int i = 9; i < invy.size(); i++) {
+            if (tryDropTrashItem(invy, i)) {
+                return true;
+            }
+        }
+        for (int i = 0; i < 9; i++) {
+            if (tryDropTrashItem(invy, i)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean tryDropTrashItem(NonNullList<ItemStack> invy, int slot) {
+        ItemStack stack = invy.get(slot);
+        if (stack.isEmpty() || !Baritone.settings().trashItems.value.contains(stack.getItem())) {
+            return false;
+        }
+        return requestThrowFromInventory(slot, true);
+    }
+
+    private boolean dropExcessAcceptableThrowawayItems() {
+        if (!Baritone.settings().dropExcessAcceptableThrowawayItems.value) {
+            return false;
+        }
+        int max = Math.max(0, Baritone.settings().maxAcceptableThrowawayItems.value);
+        NonNullList<ItemStack> invy = ctx.player().getInventory().items;
+        int total = 0;
+        for (ItemStack stack : invy) {
+            if (Baritone.settings().acceptableThrowawayItems.value.contains(stack.getItem())) {
+                total += stack.getCount();
+            }
+        }
+        int surplus = total - max;
+        if (surplus <= 0) {
+            return false;
+        }
+        for (int i = 9; i < invy.size(); i++) {
+            if (tryDropThrowawaySurplus(invy, i, surplus)) {
+                return true;
+            }
+        }
+        for (int i = 0; i < 9; i++) {
+            if (tryDropThrowawaySurplus(invy, i, surplus)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean tryDropThrowawaySurplus(NonNullList<ItemStack> invy, int slot, int surplus) {
+        ItemStack stack = invy.get(slot);
+        if (stack.isEmpty() || !Baritone.settings().acceptableThrowawayItems.value.contains(stack.getItem())) {
+            return false;
+        }
+        return requestThrowFromInventory(slot, surplus >= stack.getCount());
     }
 
     private int firstValidThrowaway() { // TODO offhand idk

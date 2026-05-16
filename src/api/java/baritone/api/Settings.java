@@ -27,6 +27,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.Vec3i;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.Mirror;
@@ -57,6 +58,59 @@ import java.util.function.Consumer;
 public final class Settings {
     private static final Logger LOGGER = LoggerFactory.getLogger("Baritone");
 
+    public enum AttackType {
+        SWORD_SWEEP("swordSweep"),
+        SWORD_JUMP("swordJump"),
+        AXE_JUMP("axeJump");
+
+        private final String serializedName;
+
+        AttackType(String serializedName) {
+            this.serializedName = serializedName;
+        }
+
+        @Override
+        public String toString() {
+            return serializedName;
+        }
+    }
+
+    public enum SelfDefenceMode {
+        IN_PLACE("inPlace"),
+        SHORT_CHASE("shortChase"),
+        FULL_CHASE("fullChase");
+
+        private final String serializedName;
+
+        SelfDefenceMode(String serializedName) {
+            this.serializedName = serializedName;
+        }
+
+        @Override
+        public String toString() {
+            return serializedName;
+        }
+    }
+
+    public enum ParkourTakeoffTiming {
+        VANILLA("vanilla"),
+        DYNAMIC("dynamic"),
+        JAM("jam"),
+        HEAD_HITTER("headHitter"),
+        LATE("late");
+
+        private final String serializedName;
+
+        ParkourTakeoffTiming(String serializedName) {
+            this.serializedName = serializedName;
+        }
+
+        @Override
+        public String toString() {
+            return serializedName;
+        }
+    }
+
     /**
      * Allow Baritone to break blocks
      */
@@ -73,9 +127,63 @@ public final class Settings {
     public final Setting<Boolean> allowSprint = new Setting<>(true);
 
     /**
+     * Allow Baritone to sprint-jump on long flat straight or diagonal runs.
+     * This is execution-only and is intentionally disabled near precision moves like ascends or parkour.
+     */
+    public final Setting<Boolean> allowSprintJump = new Setting<>(false);
+
+    /**
+     * Temporarily pause or leash-chase to defend against aggroed hostile mobs.
+     */
+    public final Setting<Boolean> selfDefence = new Setting<>(false);
+
+    /**
+     * Which melee attack style to use while self defence is active.
+     */
+    public final Setting<AttackType> attackType = new Setting<>(AttackType.SWORD_SWEEP);
+
+    /**
+     * Whether self defence holds position or temporarily chases within a short leash.
+     */
+    public final Setting<SelfDefenceMode> selfDefenceMode = new Setting<>(SelfDefenceMode.IN_PLACE);
+
+    /**
+     * Maximum distance for self defence to detect and chase hostile mobs in short chase mode.
+     */
+    public final Setting<Integer> selfDefenceShortChaseDistance = new Setting<>(4);
+
+    /**
+     * Maximum distance for self defence to detect and chase hostile mobs in full chase mode.
+     */
+    public final Setting<Integer> selfDefenceFullChaseDistance = new Setting<>(16);
+
+    /**
+     * Keep the current self defence target for this many ticks after it moves behind a wall.
+     */
+    public final Setting<Integer> selfDefenceWallTargetTicks = new Setting<>(60);
+
+    /**
+     * While self defence is active and the weapon attack cooldown is not ready, back away from
+     * the target instead of standing still. This prevents taking free hits while waiting to swing.
+     */
+    public final Setting<Boolean> selfDefenceKiteOnCooldown = new Setting<>(true);
+
+    /**
+     * Minimum distance to keep from the target while kiting during cooldown.
+     * Baritone will walk backwards until this distance is reached.
+     */
+    public final Setting<Double> selfDefenceKiteDistance = new Setting<>(2.5D);
+
+    /**
      * Allow Baritone to place blocks
      */
     public final Setting<Boolean> allowPlace = new Setting<>(true);
+
+    /**
+     * The number of blocks of vertical clearance Baritone assumes the player occupies while pathing.
+     * Set this to 1 if another mod shrinks the player hitbox to fit in 1x1 spaces.
+     */
+    public final Setting<Integer> playerHeight = new Setting<>(2);
 
     /**
      * Allow Baritone to place blocks in fluid source blocks
@@ -93,6 +201,57 @@ public final class Settings {
     public final Setting<Boolean> allowInventory = new Setting<>(false);
 
     /**
+     * Automatically eat food from inventory when hunger drops to {@link #autoEatAtHunger}.
+     * Requires {@link #allowInventory} to move food from the main inventory onto the hotbar.
+     */
+    public final Setting<Boolean> autoEat = new Setting<>(false);
+
+    /**
+     * Start auto eating when the food bar is at or below this value.
+     * Minecraft's food bar maxes out at 20.
+     */
+    public final Setting<Integer> autoEatAtHunger = new Setting<>(14);
+
+    /**
+     * When hurt, prefer smaller food if it can fill the current hunger gap instead of wasting a large food item.
+     */
+    public final Setting<Boolean> autoEatConserveFood = new Setting<>(true);
+
+    /**
+     * Also eat while damaged if hunger is below {@link #autoEatRegenHunger}, even when above {@link #autoEatAtHunger}.
+     */
+    public final Setting<Boolean> autoEatForHealth = new Setting<>(true);
+
+    /**
+     * When damaged, eat until hunger can support natural regeneration.
+     * Vanilla natural regeneration starts at 18 hunger points.
+     */
+    public final Setting<Integer> autoEatRegenHunger = new Setting<>(18);
+
+    /**
+     * Only auto eat golden apples when health is below this many health points.
+     * Two hearts is four health points.
+     */
+    public final Setting<Integer> autoEatGoldenAppleHealth = new Setting<>(4);
+
+    /**
+     * Automatically equip the best armor from inventory.
+     * Protection enchantments are treated as a strong effective-defense bonus.
+     */
+    public final Setting<Boolean> autoArmor = new Setting<>(false);
+
+    /**
+     * Automatically move a Totem of Undying to the offhand slot when health is at or below
+     * {@link #autoTotemHealth}. Requires {@link #allowInventory}.
+     */
+    public final Setting<Boolean> autoTotem = new Setting<>(false);
+
+    /**
+     * Move totem to offhand when health drops to or below this value (out of 20).
+     */
+    public final Setting<Integer> autoTotemHealth = new Setting<>(12);
+
+    /**
      * Wait this many ticks between InventoryBehavior moving inventory items
      */
     public final Setting<Integer> ticksBetweenInventoryMoves = new Setting<>(1);
@@ -101,6 +260,29 @@ public final class Settings {
      * Come to a halt before doing any inventory moves. Intended for anticheat such as 2b2t
      */
     public final Setting<Boolean> inventoryMoveOnlyIfStationary = new Setting<>(false);
+
+    /**
+     * Drop acceptableThrowawayItems when carrying more than {@link #maxAcceptableThrowawayItems}.
+     */
+    public final Setting<Boolean> dropExcessAcceptableThrowawayItems = new Setting<>(false);
+
+    /**
+     * Keep this many acceptableThrowawayItems before dropping surplus.
+     */
+    public final Setting<Integer> maxAcceptableThrowawayItems = new Setting<>(64);
+
+    /**
+     * Drop items in {@link #trashItems} whenever they are found in inventory.
+     */
+    public final Setting<Boolean> dropTrashItems = new Setting<>(false);
+
+    /**
+     * Items to drop from inventory automatically when {@link #dropTrashItems} is enabled.
+     */
+    public final Setting<List<Item>> trashItems = new Setting<>(new ArrayList<>(Arrays.asList(
+            Blocks.TUFF.asItem(),
+            Items.ROTTEN_FLESH
+    )));
 
     /**
      * Disable baritone's auto-tool at runtime, but still assume that another mod will provide auto tool functionality
@@ -367,6 +549,21 @@ public final class Settings {
      * Doesn't make it any more dangerous compared to just normal allowParkour th
      */
     public final Setting<Boolean> allowParkourPlace = new Setting<>(false);
+
+    /**
+     * Allow longer flat parkour jumps by taking a runway on ice or blue ice first.
+     * <p>
+     * This is much more setup-sensitive than normal parkour because it depends on preserved momentum.
+     */
+    public final Setting<Boolean> allowIceParkour = new Setting<>(false);
+
+    /**
+     * Execution-only timing profile for parkour takeoff once a parkour move has already been chosen.
+     * <p>
+     * {@code dynamic} picks more human-looking jump timing from the gap and landing height,
+     * while {@code vanilla} preserves Baritone's original behavior.
+     */
+    public final Setting<ParkourTakeoffTiming> parkourTakeoffTiming = new Setting<>(ParkourTakeoffTiming.DYNAMIC);
 
     /**
      * For example, if you have Mining Fatigue or Haste, adjust the costs of breaking blocks accordingly.
@@ -674,6 +871,13 @@ public final class Settings {
     public final Setting<Boolean> logAsToast = new Setting<>(false);
 
     /**
+     * The time of how long the message in the pop-up will display
+     * <p>
+     * If below 1000L (1sec), it's better to disable this
+     */
+    public final Setting<Long> toastTimer = new Setting<>(5000L);
+
+    /**
      * Print all the debug messages to chat
      */
     public final Setting<Boolean> chatDebug = new Setting<>(false);
@@ -714,6 +918,26 @@ public final class Settings {
      * Render selection boxes
      */
     public final Setting<Boolean> renderSelectionBoxes = new Setting<>(true);
+
+    /**
+     * Render debug overlays for active parkour movements
+     */
+    public final Setting<Boolean> renderParkourDebug = new Setting<>(false);
+
+    /**
+     * Render the last rejected nearby ascend candidate and its blocker columns.
+     */
+    public final Setting<Boolean> renderAscendDebug = new Setting<>(false);
+
+    /**
+     * Print the last rejected nearby ascend candidate and its rejection reason in chat.
+     */
+    public final Setting<Boolean> logAscendDebug = new Setting<>(false);
+
+    /**
+     * Render the player's next-tick velocity from their feet while moving.
+     */
+    public final Setting<Boolean> renderVelocityDebug = new Setting<>(false);
 
     /**
      * Ignore depth when rendering the goal
@@ -809,6 +1033,11 @@ public final class Settings {
     public final Setting<Boolean> sprintInWater = new Setting<>(true);
 
     /**
+     * Vertical tolerance while swimming before Baritone presses jump or sneak to correct back toward the planned swim Y.
+     */
+    public final Setting<Double> swimDeadband = new Setting<>(0.3D);
+
+    /**
      * When GetToBlockProcess or MineProcess fails to calculate a path, instead of just giving up, mark the closest instance
      * of that block as "unreachable" and go towards the next closest. GetToBlock expands this search to the whole "vein"; MineProcess does not.
      * This is because MineProcess finds individual impossible blocks (like one block in a vein that has gravel on top then lava, so it can't break)
@@ -885,6 +1114,30 @@ public final class Settings {
      * touch tools over other tools of the same speed. This includes always choosing ANY silk touch tool over your hand.
      */
     public final Setting<Boolean> preferSilkTouch = new Setting<>(false);
+
+    /**
+     * Blocks for which autoTool will prefer a Silk Touch tool when one is available on the hotbar.
+     * Useful for glass, ice, and similar blocks that drop nothing (or the wrong item) without Silk Touch.
+     * Add or remove blocks at runtime the same way as {@link #blocksToAvoidBreaking}.
+     */
+    public final Setting<List<Block>> silkTouchBlocks = new Setting<>(new ArrayList<>(Arrays.asList(
+            Blocks.GLASS,
+            Blocks.WHITE_STAINED_GLASS, Blocks.ORANGE_STAINED_GLASS, Blocks.MAGENTA_STAINED_GLASS,
+            Blocks.LIGHT_BLUE_STAINED_GLASS, Blocks.YELLOW_STAINED_GLASS, Blocks.LIME_STAINED_GLASS,
+            Blocks.PINK_STAINED_GLASS, Blocks.GRAY_STAINED_GLASS, Blocks.LIGHT_GRAY_STAINED_GLASS,
+            Blocks.CYAN_STAINED_GLASS, Blocks.PURPLE_STAINED_GLASS, Blocks.BLUE_STAINED_GLASS,
+            Blocks.BROWN_STAINED_GLASS, Blocks.GREEN_STAINED_GLASS, Blocks.RED_STAINED_GLASS,
+            Blocks.BLACK_STAINED_GLASS,
+            Blocks.GLASS_PANE,
+            Blocks.WHITE_STAINED_GLASS_PANE, Blocks.ORANGE_STAINED_GLASS_PANE, Blocks.MAGENTA_STAINED_GLASS_PANE,
+            Blocks.LIGHT_BLUE_STAINED_GLASS_PANE, Blocks.YELLOW_STAINED_GLASS_PANE, Blocks.LIME_STAINED_GLASS_PANE,
+            Blocks.PINK_STAINED_GLASS_PANE, Blocks.GRAY_STAINED_GLASS_PANE, Blocks.LIGHT_GRAY_STAINED_GLASS_PANE,
+            Blocks.CYAN_STAINED_GLASS_PANE, Blocks.PURPLE_STAINED_GLASS_PANE, Blocks.BLUE_STAINED_GLASS_PANE,
+            Blocks.BROWN_STAINED_GLASS_PANE, Blocks.GREEN_STAINED_GLASS_PANE, Blocks.RED_STAINED_GLASS_PANE,
+            Blocks.BLACK_STAINED_GLASS_PANE,
+            Blocks.ICE, Blocks.PACKED_ICE, Blocks.BLUE_ICE,
+            Blocks.GRASS_BLOCK, Blocks.MYCELIUM, Blocks.PODZOL
+    )));
 
     /**
      * Don't stop walking forward when you need to break blocks in your way
@@ -1168,6 +1421,96 @@ public final class Settings {
      * Also on cosmic prisons this should be set to true since you don't actually mine the ore it just gets replaced with stone.
      */
     public final Setting<Boolean> cancelOnGoalInvalidation = new Setting<>(true);
+
+    /**
+     * When mining, expand ore targets to include all directly-connected blocks of the same type (vein mining).
+     * The BFS runs in the background rescan thread and is capped by {@link #veinMineMaxExpand}.
+     */
+    public final Setting<Boolean> veinMine = new Setting<>(false);
+
+    /**
+     * Maximum number of additional ore blocks to add per rescan pass when {@link #veinMine} is enabled.
+     */
+    public final Setting<Integer> veinMineMaxExpand = new Setting<>(64);
+
+    /**
+     * Length of the main corridor dug by the #branchmine command.
+     */
+    public final Setting<Integer> branchMineMainLength = new Setting<>(64);
+
+    /**
+     * Length of each side branch dug by the #branchmine command.
+     */
+    public final Setting<Integer> branchMineSideLength = new Setting<>(16);
+
+    /**
+     * Spacing (in blocks) between side branches in the main corridor for #branchmine.
+     */
+    public final Setting<Integer> branchMineSpacing = new Setting<>(2);
+
+    /**
+     * Target Y level for the #branchmine command. Set to -1 to use the player's current Y level.
+     */
+    public final Setting<Integer> branchMineTargetY = new Setting<>(-57);
+
+    /**
+     * Default corridor length for the #stripmine command.
+     */
+    public final Setting<Integer> stripMineLength = new Setting<>(128);
+
+    /**
+     * Default number of parallel corridors for the #stripmine command (center + sides).
+     * Odd values are centred on the player; even values round down.
+     */
+    public final Setting<Integer> stripMineCorridors = new Setting<>(5);
+
+    /**
+     * Block spacing between adjacent strip-mine corridors (including the wall between them).
+     * 3 means each corridor is separated by 2 blocks of uncut rock, which exposes every ore.
+     */
+    public final Setting<Integer> stripMineSpacing = new Setting<>(3);
+
+    /**
+     * Target Y level for the #stripmine command.  Values outside [-64, 320] use the player's current Y.
+     */
+    public final Setting<Integer> stripMineTargetY = new Setting<>(-57);
+
+    /**
+     * Strip mine pauses for auto-deposit when fewer than this many inventory slots are free.
+     */
+    public final Setting<Integer> stripmineInventoryFreeSlots = new Setting<>(3);
+
+    /**
+     * Milliseconds to wait after a deposit chest opens before transferring items.
+     * Gives the server time to send chest contents over the network before reading slots.
+     * Increase on high-ping servers if items fail to deposit.
+     */
+    public final Setting<Integer> stripmineChestOpenDelayMs = new Setting<>(400);
+
+    /**
+     * Automatically place torches while pathing when block light is low.
+     */
+    public final Setting<Boolean> autoTorch = new Setting<>(false);
+
+    /**
+     * Block light level at or below which a torch will be placed (mobs spawn at ≤7).
+     */
+    public final Setting<Integer> autoTorchLightThreshold = new Setting<>(7);
+
+    /**
+     * Minimum distance in blocks traveled since the last torch before placing another.
+     */
+    public final Setting<Integer> autoTorchSpacing = new Setting<>(12);
+
+    /**
+     * Automatically click the respawn button when the death screen appears.
+     */
+    public final Setting<Boolean> autoRespawn = new Setting<>(false);
+
+    /**
+     * Milliseconds to wait on the death screen before auto-respawning.
+     */
+    public final Setting<Integer> autoRespawnTimeoutMs = new Setting<>(4000);
 
     /**
      * The "axis" command (aka GoalAxis) will go to a axis, or diagonal axis, at this Y level.
