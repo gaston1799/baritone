@@ -69,6 +69,8 @@ public class Baritone implements IBaritone {
     private final PathingBehavior pathingBehavior;
     private final LookBehavior lookBehavior;
     private final InventoryBehavior inventoryBehavior;
+    private final ChestLogBehavior chestLogBehavior;
+    private final SelfDefenceBehavior selfDefenceBehavior;
     private final InputOverrideHandler inputOverrideHandler;
 
     private final FollowProcess followProcess;
@@ -78,6 +80,10 @@ public class Baritone implements IBaritone {
     private final BuilderProcess builderProcess;
     private final ExploreProcess exploreProcess;
     private final FarmProcess farmProcess;
+    private final CraftProcess craftProcess;
+    private final SelfDefenceProcess selfDefenceProcess;
+    private final BranchMineProcess branchMineProcess;
+    private final StripmineProcess stripmineProcess;
     private final InventoryPauserProcess inventoryPauserProcess;
     private final IElytraProcess elytraProcess;
 
@@ -108,7 +114,10 @@ public class Baritone implements IBaritone {
             this.lookBehavior         = this.registerBehavior(LookBehavior::new);
             this.pathingBehavior      = this.registerBehavior(PathingBehavior::new);
             this.inventoryBehavior    = this.registerBehavior(InventoryBehavior::new);
+            this.selfDefenceBehavior  = this.registerBehavior(SelfDefenceBehavior::new);
             this.inputOverrideHandler = this.registerBehavior(InputOverrideHandler::new);
+            this.chestLogBehavior     = this.registerBehavior(ChestLogBehavior::new);
+            this.registerBehavior(TorchBehavior::new);
             this.registerBehavior(WaypointBehavior::new);
         }
 
@@ -121,6 +130,10 @@ public class Baritone implements IBaritone {
             this.builderProcess          = this.registerProcess(BuilderProcess::new);
             this.exploreProcess          = this.registerProcess(ExploreProcess::new);
             this.farmProcess             = this.registerProcess(FarmProcess::new);
+            this.craftProcess            = this.registerProcess(CraftProcess::new);
+            this.selfDefenceProcess      = this.registerProcess(SelfDefenceProcess::new);
+            this.branchMineProcess       = this.registerProcess(BranchMineProcess::new);
+            this.stripmineProcess        = this.registerProcess(StripmineProcess::new);
             this.inventoryPauserProcess  = this.registerProcess(InventoryPauserProcess::new);
             this.elytraProcess           = this.registerProcess(ElytraProcess::create);
             this.registerProcess(BackfillProcess::new);
@@ -186,6 +199,14 @@ public class Baritone implements IBaritone {
         return this.inventoryBehavior;
     }
 
+    public SelfDefenceBehavior getSelfDefenceBehavior() {
+        return this.selfDefenceBehavior;
+    }
+
+    public ChestLogBehavior getChestLogBehavior() {
+        return this.chestLogBehavior;
+    }
+
     @Override
     public LookBehavior getLookBehavior() {
         return this.lookBehavior;
@@ -206,8 +227,24 @@ public class Baritone implements IBaritone {
         return this.farmProcess;
     }
 
+    public CraftProcess getCraftProcess() {
+        return this.craftProcess;
+    }
+
     public InventoryPauserProcess getInventoryPauserProcess() {
         return this.inventoryPauserProcess;
+    }
+
+    public SelfDefenceProcess getSelfDefenceProcess() {
+        return this.selfDefenceProcess;
+    }
+
+    public BranchMineProcess getBranchMineProcess() {
+        return this.branchMineProcess;
+    }
+
+    public StripmineProcess getStripmineProcess() {
+        return this.stripmineProcess;
     }
 
     @Override

@@ -18,6 +18,8 @@
 package baritone.utils;
 
 import baritone.api.utils.input.Input;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
 
 public class PlayerMovementInput extends net.minecraft.client.player.Input {
 
@@ -51,8 +53,12 @@ public class PlayerMovementInput extends net.minecraft.client.player.Input {
         }
 
         if (this.shiftKeyDown = handler.isInputForcedDown(Input.SNEAK)) {
-            this.leftImpulse *= 0.3D;
-            this.forwardImpulse *= 0.3D;
+            LocalPlayer player = Minecraft.getInstance().player;
+            boolean underwaterSwimming = player != null && player.isInWater() && !player.onGround();
+            if (!underwaterSwimming) {
+                this.leftImpulse *= 0.3D;
+                this.forwardImpulse *= 0.3D;
+            }
         }
     }
 }

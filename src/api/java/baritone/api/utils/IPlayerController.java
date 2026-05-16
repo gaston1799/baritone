@@ -23,8 +23,10 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.BlockHitResult;
@@ -45,11 +47,15 @@ public interface IPlayerController {
 
     void windowClick(int windowId, int slotId, int mouseButton, ClickType type, Player player);
 
+    void handlePlaceRecipe(int windowId, Recipe<?> recipe, boolean craftAll);
+
     GameType getGameType();
 
     InteractionResult processRightClickBlock(LocalPlayer player, Level world, InteractionHand hand, BlockHitResult result);
 
     InteractionResult processRightClick(LocalPlayer player, Level world, InteractionHand hand);
+
+    void attackEntity(LocalPlayer player, Entity target);
 
     boolean clickBlock(BlockPos loc, Direction face);
 

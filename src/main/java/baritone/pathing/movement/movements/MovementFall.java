@@ -140,6 +140,9 @@ public class MovementFall extends Movement {
         }
         Vec3 destCenter = VecUtils.getBlockPosCenter(dest); // we are moving to the 0.5 center not the edge (like if we were falling on a ladder)
         if (Math.abs(ctx.player().position().x + ctx.player().getDeltaMovement().x - destCenter.x) > 0.1 || Math.abs(ctx.player().position().z + ctx.player().getDeltaMovement().z - destCenter.z) > 0.1) {
+            if (playerFeet.equals(dest) && ctx.player().onGround() && MovementHelper.moveBackIfOvershot(ctx, state, src, dest, 0.1D)) {
+                return state;
+            }
             if (!ctx.player().onGround() && Math.abs(ctx.player().getDeltaMovement().y) > 0.4) {
                 state.setInput(Input.SNEAK, true);
             }

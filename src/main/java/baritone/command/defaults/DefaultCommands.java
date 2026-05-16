@@ -50,11 +50,13 @@ public final class DefaultCommands {
                 new GcCommand(baritone),
                 new InvertCommand(baritone),
                 new TunnelCommand(baritone),
+                new BranchMineCommand(baritone),
                 new RenderCommand(baritone),
                 new FarmCommand(baritone),
                 new FollowCommand(baritone),
                 new PickupCommand(baritone),
                 new ExploreFilterCommand(baritone),
+                new CraftCommand(baritone),
                 new ReloadAllCommand(baritone),
                 new SaveAllCommand(baritone),
                 new ExploreCommand(baritone),
@@ -64,11 +66,17 @@ public final class DefaultCommands {
                 new ClickCommand(baritone),
                 new SurfaceCommand(baritone),
                 new ThisWayCommand(baritone),
+                new BridgeCommand(baritone),
                 new WaypointsCommand(baritone),
                 new CommandAlias(baritone, "sethome", "Sets your home waypoint", "waypoints save home"),
                 new CommandAlias(baritone, "home", "Path to your home waypoint", "waypoints goto home"),
                 new SelCommand(baritone),
-                new ElytraCommand(baritone)
+                new ElytraCommand(baritone),
+                new FillCommand(baritone),
+                new OutlineCommand(baritone),
+                new StripmineCommand(baritone),
+                new NetCommand(baritone),
+                new ChestCommand(baritone)
         ));
         ExecutionControlCommands prc = new ExecutionControlCommands(baritone);
         commands.add(prc.pauseCommand);

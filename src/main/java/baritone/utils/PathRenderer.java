@@ -20,10 +20,18 @@ package baritone.utils;
 import baritone.api.BaritoneAPI;
 import baritone.api.event.events.RenderEvent;
 import baritone.api.pathing.goals.*;
+import baritone.api.pathing.movement.IMovement;
 import baritone.api.utils.BetterBlockPos;
+import baritone.api.utils.Helper;
 import baritone.api.utils.IPlayerContext;
+import baritone.api.utils.VecUtils;
 import baritone.api.utils.interfaces.IGoalRenderPos;
 import baritone.behavior.PathingBehavior;
+import baritone.process.StripmineProcess;
+import baritone.pathing.movement.movements.AscendDebugInfo;
+import baritone.pathing.movement.movements.AscendDebugTrace;
+import baritone.pathing.movement.movements.ParkourDebugInfo;
+import baritone.pathing.movement.movements.ParkourDebuggable;
 import baritone.pathing.path.PathExecutor;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -35,6 +43,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
@@ -91,12 +100,21 @@ public final class PathRenderer implements IRenderer {
             drawGoal(event.getModelViewStack(), ctx, goal, partialTicks, settings.colorGoalBox.value);
         }
 
+        PathExecutor current = behavior.getCurrent(); // this should prevent most race conditions?
+        PathExecutor next = behavior.getNext(); // like, now it's not possible for current!=null to be true, then suddenly false because of another thread
+        if (settings.renderParkourDebug.value && current != null) {
+            renderParkourDebug(event.getModelViewStack(), ctx, current);
+        }
+        if (settings.renderAscendDebug.value || settings.logAscendDebug.value) {
+            renderAscendDebug(event.getModelViewStack(), ctx);
+        }
+        if (settings.renderVelocityDebug.value) {
+            renderVelocityDebug(event.getModelViewStack(), ctx);
+        }
+
         if (!settings.renderPath.value) {
             return;
         }
-
-        PathExecutor current = behavior.getCurrent(); // this should prevent most race conditions?
-        PathExecutor next = behavior.getNext(); // like, now it's not possible for current!=null to be true, then suddenly false because of another thread
         if (current != null && settings.renderSelectionBoxes.value) {
             drawManySelectionBoxes(event.getModelViewStack(), ctx.player(), current.toBreak(), settings.colorBlocksToBreak.value);
             drawManySelectionBoxes(event.getModelViewStack(), ctx.player(), current.toPlace(), settings.colorBlocksToPlace.value);
@@ -126,6 +144,98 @@ public final class PathRenderer implements IRenderer {
                 drawManySelectionBoxes(event.getModelViewStack(), ctx.player(), Collections.singletonList(mr.getDest()), settings.colorMostRecentConsidered.value);
             });
         });
+
+        // Draw unsafe stripmine targets (lava/water-adjacent ores) in orange
+        if (settings.renderSelectionBoxes.value) {
+            StripmineProcess smp = behavior.baritone.getStripmineProcess();
+            if (smp.isActive()) {
+                java.util.Set<BlockPos> unsafe = smp.getUnsafeTargets();
+                if (!unsafe.isEmpty()) {
+                    drawManySelectionBoxes(event.getModelViewStack(), ctx.player(), unsafe, new Color(0xFF6600));
+                }
+            }
+        }
+    }
+
+    private static void renderParkourDebug(PoseStack stack, IPlayerContext ctx, PathExecutor executor) {
+        if (executor.getPath() == null) {
+            return;
+        }
+        int position = executor.getPosition();
+        if (position < 0 || position >= executor.getPath().movements().size()) {
+            return;
+        }
+        IMovement movement = executor.getPath().movements().get(position);
+        if (!(movement instanceof ParkourDebuggable debuggable)) {
+            return;
+        }
+        ParkourDebugInfo debug = debuggable.parkourDebugInfo();
+        drawManySelectionBoxes(stack, ctx.player(), debug.takeoffBlocks(), new Color(0xFFB000));
+        drawManySelectionBoxes(stack, ctx.player(), Collections.singletonList(debug.dest()), debug.commitActive() ? Color.RED : Color.GREEN);
+        if (debug.runwayStart() != null && !debug.takeoffBlocks().contains(debug.runwayStart())) {
+            drawManySelectionBoxes(stack, ctx.player(), Collections.singletonList(debug.runwayStart()), new Color(0xCC4444));
+        }
+        drawDebugMarker(stack, debug.thresholdPoint(), debug.windowOpen() ? Color.GREEN : Color.WHITE);
+        drawDebugLine(stack, ctx.playerHead(), debug.aimPoint(), new Color(0xCC33FF));
+        drawDebugLine(stack, ctx.playerHead(), debug.landingTarget(), debug.commitActive() ? new Color(0xFF4444) : new Color(0x33D1FF));
+    }
+
+    private static void renderAscendDebug(PoseStack stack, IPlayerContext ctx) {
+        AscendDebugInfo pending = settings.logAscendDebug.value ? AscendDebugTrace.pollForChat() : null;
+        if (pending != null) {
+            Helper.HELPER.logDirect("Ascend debug: " + pending.reason() + " (" + pending.src() + " -> " + pending.dest() + ")", false);
+        }
+        if (!settings.renderAscendDebug.value) {
+            return;
+        }
+        AscendDebugInfo debug = AscendDebugTrace.current();
+        if (debug == null) {
+            return;
+        }
+        drawManySelectionBoxes(stack, ctx.player(), Collections.singletonList(debug.src()), new Color(0xFFB000));
+        drawManySelectionBoxes(stack, ctx.player(), Collections.singletonList(debug.dest()), new Color(0xFF4444));
+        if (!debug.blockers().isEmpty()) {
+            drawManySelectionBoxes(stack, ctx.player(), debug.blockers(), new Color(0xAA33FF));
+        }
+        drawDebugLine(stack, VecUtils.getBlockPosCenter(debug.src()), VecUtils.getBlockPosCenter(debug.dest()), new Color(0xFF6666));
+    }
+
+    private static void renderVelocityDebug(PoseStack stack, IPlayerContext ctx) {
+        if (ctx.player() == null) {
+            return;
+        }
+        Vec3 velocity = ctx.player().getDeltaMovement();
+        if (ctx.player().onGround() && Math.abs(velocity.y) < 0.08D) {
+            velocity = new Vec3(velocity.x, 0.0D, velocity.z);
+        }
+        if (velocity.lengthSqr() < 1.0E-4D) {
+            return;
+        }
+        Vec3 start = new Vec3(ctx.player().position().x, ctx.player().getBoundingBox().minY + 0.05D, ctx.player().position().z);
+        Vec3 end = start.add(velocity);
+        Color color = new Color(0x33D1FF);
+        drawDebugMarker(stack, start, color);
+        drawDebugLine(stack, start, end, color);
+        drawDebugMarker(stack, end, new Color(0xFFB000));
+    }
+
+    private static void drawDebugMarker(PoseStack stack, Vec3 center, Color color) {
+        IRenderer.startLines(color, settings.pathRenderLineWidthPixels.value, settings.renderPathIgnoreDepth.value);
+        IRenderer.emitAABB(stack, new AABB(
+                center.x - 0.12D,
+                center.y - 0.12D,
+                center.z - 0.12D,
+                center.x + 0.12D,
+                center.y + 0.12D,
+                center.z + 0.12D
+        ));
+        IRenderer.endLines(settings.renderPathIgnoreDepth.value);
+    }
+
+    private static void drawDebugLine(PoseStack stack, Vec3 start, Vec3 end, Color color) {
+        IRenderer.startLines(color, settings.pathRenderLineWidthPixels.value, settings.renderPathIgnoreDepth.value);
+        IRenderer.emitLine(stack, start, end);
+        IRenderer.endLines(settings.renderPathIgnoreDepth.value);
     }
 
     public static void drawPath(PoseStack stack, List<BetterBlockPos> positions, int startIndex, Color color, boolean fadeOut, int fadeStart0, int fadeEnd0) {
@@ -201,7 +311,7 @@ public final class PathRenderer implements IRenderer {
         }
     }
 
-    public static void drawManySelectionBoxes(PoseStack stack, Entity player, Collection<BlockPos> positions, Color color) {
+    public static void drawManySelectionBoxes(PoseStack stack, Entity player, Collection<? extends BlockPos> positions, Color color) {
         IRenderer.startLines(color, settings.pathRenderLineWidthPixels.value, settings.renderSelectionBoxesIgnoreDepth.value);
 
         //BlockPos blockpos = movingObjectPositionIn.getBlockPos();

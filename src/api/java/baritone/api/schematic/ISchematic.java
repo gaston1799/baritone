@@ -73,6 +73,13 @@ public interface ISchematic {
     BlockState desiredState(int x, int y, int z, BlockState current, List<BlockState> approxPlaceable);
 
     /**
+     * Whether this schematic should be broken top-down rather than bottom-up.
+     * Clearing schematics (fill with air) return true so the builder doesn't
+     * destroy its own footing while working through the region.
+     */
+    default boolean preferTopDown() { return false; }
+
+    /**
      * Resets possible caches to avoid wrong behavior when moving the schematic around
      */
     default void reset() {}

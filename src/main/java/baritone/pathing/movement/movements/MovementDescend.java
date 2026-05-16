@@ -45,7 +45,7 @@ public class MovementDescend extends Movement {
     public boolean forceSafeMode = false;
 
     public MovementDescend(IBaritone baritone, BetterBlockPos start, BetterBlockPos end) {
-        super(baritone, start, end, new BetterBlockPos[]{end.above(2), end.above(), end}, end.below());
+        super(baritone, start, end, topDownClearance(end, MovementHelper.pathingPlayerHeight() + 1), end.below());
     }
 
     @Override
@@ -78,19 +78,16 @@ public class MovementDescend extends Movement {
     }
 
     public static void cost(CalculationContext context, int x, int y, int z, int destX, int destZ, MutableMoveResult res) {
+        int playerHeight = context.playerHeight;
         double totalCost = 0;
         BlockState destDown = context.get(destX, y - 1, destZ);
-        totalCost += MovementHelper.getMiningDurationTicks(context, destX, y - 1, destZ, destDown, false);
-        if (totalCost >= COST_INF) {
-            return;
-        }
-        totalCost += MovementHelper.getMiningDurationTicks(context, destX, y, destZ, false);
-        if (totalCost >= COST_INF) {
-            return;
-        }
-        totalCost += MovementHelper.getMiningDurationTicks(context, destX, y + 1, destZ, true); // only the top block in the 3 we need to mine needs to consider the falling blocks above
-        if (totalCost >= COST_INF) {
-            return;
+        for (int offset = 0; offset <= playerHeight; offset++) {
+            int blockY = y - 1 + offset;
+            BlockState state = offset == 0 ? destDown : context.get(destX, blockY, destZ);
+            totalCost += MovementHelper.getMiningDurationTicks(context, destX, blockY, destZ, state, offset == playerHeight);
+            if (totalCost >= COST_INF) {
+                return;
+            }
         }
 
         Block fromDown = context.get(x, y - 1, z).getBlock();
@@ -135,7 +132,7 @@ public class MovementDescend extends Movement {
     }
 
     public static boolean dynamicFallCost(CalculationContext context, int x, int y, int z, int destX, int destZ, double frontBreak, BlockState below, MutableMoveResult res) {
-        if (frontBreak != 0 && context.get(destX, y + 2, destZ).getBlock() instanceof FallingBlock) {
+        if (frontBreak != 0 && context.get(destX, y + context.playerHeight, destZ).getBlock() instanceof FallingBlock) {
             // if frontBreak is 0 we can actually get through this without updating the falling block and making it actually fall
             // but if frontBreak is nonzero, we're breaking blocks in front, so don't let anything fall through this column,
             // and potentially replace the water we're going to fall into
@@ -260,6 +257,9 @@ public class MovementDescend extends Movement {
         state.setInput(Input.SNEAK, Baritone.settings().allowWalkOnMagmaBlocks.value && ctx.world().getBlockState(ctx.player().blockPosition().below()).is(Blocks.MAGMA_BLOCK));
 
         if (!playerFeet.equals(dest) || ab > 0.25) {
+            if (playerFeet.equals(dest) && MovementHelper.moveBackIfOvershot(ctx, state, src, dest, 0.25D)) {
+                return state;
+            }
             if (numTicks++ < 20 && fromStart < 1.25) {
                 MovementHelper.moveTowards(ctx, state, fakeDest);
             } else {
@@ -280,7 +280,7 @@ public class MovementDescend extends Movement {
             // if dest extends into can't walk through, but the two above are can walk through, then we can overshoot and glitch in that weird way
             return true;
         }
-        for (int y = 0; y <= 2; y++) { // we could hit any of the three blocks
+        for (int y = 0; y <= MovementHelper.pathingPlayerHeight(); y++) { // we could hit any of the body blocks plus one extra overhead block
             if (MovementHelper.avoidWalkingInto(BlockStateInterface.get(ctx, into.above(y)))) {
                 return true;
             }
@@ -290,6 +290,7 @@ public class MovementDescend extends Movement {
 
     public boolean skipToAscend() {
         BlockPos into = dest.subtract(src.below()).offset(dest);
-        return !MovementHelper.canWalkThrough(ctx, new BetterBlockPos(into)) && MovementHelper.canWalkThrough(ctx, new BetterBlockPos(into).above()) && MovementHelper.canWalkThrough(ctx, new BetterBlockPos(into).above(2));
+        return !MovementHelper.canWalkThrough(ctx, new BetterBlockPos(into))
+                && MovementHelper.hasVerticalClearance(ctx, into.above(), MovementHelper.pathingPlayerHeight());
     }
 }

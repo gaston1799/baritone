@@ -17,6 +17,7 @@
 
 package baritone.command.defaults;
 
+import baritone.Baritone;
 import baritone.api.IBaritone;
 import baritone.api.command.Command;
 import baritone.api.command.argument.IArgConsumer;
@@ -43,9 +44,15 @@ public class TunnelCommand extends Command {
             int height = Integer.parseInt(args.getArgs().get(0).getValue());
             int width = Integer.parseInt(args.getArgs().get(1).getValue());
             int depth = Integer.parseInt(args.getArgs().get(2).getValue());
+            int minHeight = Math.max(1, Baritone.settings().playerHeight.value) == 1 ? 1 : 2;
 
-            if (width < 1 || height < 2 || depth < 1 || height > ctx.world().getMaxBuildHeight()){
-                logDirect("Width and depth must at least be 1 block; Height must at least be 2 blocks, and cannot be greater than the build limit.");
+            if (width < 1 || height < minHeight || depth < 1 || height > ctx.world().getMaxBuildHeight()) {
+                logDirect(String.format(
+                        "Width and depth must be at least 1 block; Height must be at least %d block%s, and cannot be greater than the build limit.%s",
+                        minHeight,
+                        minHeight == 1 ? "" : "s",
+                        minHeight == 1 ? "" : " Height 1 requires playerHeight 1."
+                ));
                 cont = false;
             }
 
@@ -106,7 +113,7 @@ public class TunnelCommand extends Command {
                 "",
                 "Usage:",
                 "> tunnel - No arguments, mines in a 1x2 radius.",
-                "> tunnel <height> <width> <depth> - Tunnels in a user defined height, width and depth."
+                "> tunnel <height> <width> <depth> - Tunnels in a user defined height, width and depth. Height 1 requires playerHeight 1."
         );
     }
 }

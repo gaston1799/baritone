@@ -54,6 +54,7 @@ public class CalculationContext {
     public final Level world;
     public final WorldData worldData;
     public final BlockStateInterface bsi;
+    public final int playerHeight;
     public final ToolSet toolSet;
     public final boolean hasWaterBucket;
     public final boolean hasThrowaway;
@@ -63,6 +64,7 @@ public class CalculationContext {
     public final List<Block> allowBreakAnyway;
     public final boolean allowParkour;
     public final boolean allowParkourPlace;
+    public final boolean allowIceParkour;
     public final boolean allowJumpAtBuildLimit;
     public final boolean allowParkourAscend;
     public final boolean assumeWalkOnWater;
@@ -96,6 +98,7 @@ public class CalculationContext {
         this.world = baritone.getPlayerContext().world();
         this.worldData = (WorldData) baritone.getPlayerContext().worldData();
         this.bsi = new BlockStateInterface(baritone.getPlayerContext(), forUseOnAnotherThread);
+        this.playerHeight = Math.max(1, Baritone.settings().playerHeight.value);
         this.toolSet = new ToolSet(player);
         this.hasThrowaway = Baritone.settings().allowPlace.value && ((Baritone) baritone).getInventoryBehavior().hasGenericThrowaway();
         this.hasWaterBucket = Baritone.settings().allowWaterBucketFall.value && Inventory.isHotbarSlot(player.getInventory().findSlotMatchingItem(STACK_BUCKET_WATER)) && world.dimension() != Level.NETHER;
@@ -105,6 +108,7 @@ public class CalculationContext {
         this.allowBreakAnyway = new ArrayList<>(Baritone.settings().allowBreakAnyway.value);
         this.allowParkour = Baritone.settings().allowParkour.value;
         this.allowParkourPlace = Baritone.settings().allowParkourPlace.value;
+        this.allowIceParkour = Baritone.settings().allowIceParkour.value;
         this.allowJumpAtBuildLimit = Baritone.settings().allowJumpAtBuildLimit.value;
         this.allowParkourAscend = Baritone.settings().allowParkourAscend.value;
         this.assumeWalkOnWater = Baritone.settings().assumeWalkOnWater.value;

@@ -39,7 +39,17 @@ public class MovementAscend extends Movement {
     private int ticksWithoutPlacement = 0;
 
     public MovementAscend(IBaritone baritone, BetterBlockPos src, BetterBlockPos dest) {
-        super(baritone, src, dest, new BetterBlockPos[]{dest, src.above(2), dest.above()}, dest.below());
+        super(
+                baritone,
+                src,
+                dest,
+                concat(
+                        new BetterBlockPos[]{dest},
+                        topDownClearance(src.above(MovementHelper.pathingPlayerHeight()), 1),
+                        topDownClearance(dest.above(), MovementHelper.pathingPlayerHeight() - 1)
+                ),
+                dest.below()
+        );
     }
 
     @Override
@@ -65,6 +75,7 @@ public class MovementAscend extends Movement {
     }
 
     public static double cost(CalculationContext context, int x, int y, int z, int destX, int destZ) {
+        int playerHeight = context.playerHeight;
         BlockState toPlace = context.get(destX, y, destZ);
         double additionalPlacementCost = 0;
         if (!MovementHelper.canWalkOn(context, destX, y, destZ, toPlace)) {
@@ -92,8 +103,9 @@ public class MovementAscend extends Movement {
                 return COST_INF;
             }
         }
-        BlockState srcUp2 = context.get(x, y + 2, z); // used lower down anyway
-        if (context.get(x, y + 3, z).getBlock() instanceof FallingBlock && (MovementHelper.canWalkThrough(context, x, y + 1, z) || !(srcUp2.getBlock() instanceof FallingBlock))) {//it would fall on us and possibly suffocate us
+        BlockState srcHeadClearance = context.get(x, y + playerHeight, z); // used lower down anyway
+        if (context.get(x, y + playerHeight + 1, z).getBlock() instanceof FallingBlock
+                && (MovementHelper.canWalkThrough(context, x, y + playerHeight - 1, z) || !(srcHeadClearance.getBlock() instanceof FallingBlock))) {//it would fall on us and possibly suffocate us
             // HOWEVER, we assume that we're standing in the start position
             // that means that src and src.up(1) are both air
             // maybe they aren't now, but they will be by the time this starts
@@ -142,17 +154,18 @@ public class MovementAscend extends Movement {
         }
 
         double totalCost = walk + additionalPlacementCost;
-        // start with srcUp2 since we already have its state
-        // includeFalling isn't needed because of the falling check above -- if srcUp3 is falling we will have already exited with COST_INF if we'd actually have to break it
-        totalCost += MovementHelper.getMiningDurationTicks(context, x, y + 2, z, srcUp2, false);
+        // start with srcHeadClearance since we already have its state
+        // includeFalling isn't needed because of the falling check above -- if the block above it is falling we will have already exited with COST_INF if we'd actually have to break it
+        totalCost += MovementHelper.getMiningDurationTicks(context, x, y + playerHeight, z, srcHeadClearance, false);
         if (totalCost >= COST_INF) {
             return COST_INF;
         }
-        totalCost += MovementHelper.getMiningDurationTicks(context, destX, y + 1, destZ, false);
-        if (totalCost >= COST_INF) {
-            return COST_INF;
+        for (int offset = 1; offset <= playerHeight; offset++) {
+            totalCost += MovementHelper.getMiningDurationTicks(context, destX, y + offset, destZ, offset == playerHeight);
+            if (totalCost >= COST_INF) {
+                return COST_INF;
+            }
         }
-        totalCost += MovementHelper.getMiningDurationTicks(context, destX, y + 2, destZ, true);
         return totalCost;
     }
 
@@ -227,7 +240,7 @@ public class MovementAscend extends Movement {
     }
 
     public boolean headBonkClear() {
-        BetterBlockPos startUp = src.above(2);
+        BetterBlockPos startUp = src.above(MovementHelper.pathingPlayerHeight());
         for (int i = 0; i < 4; i++) {
             BetterBlockPos check = startUp.relative(Direction.from2DDataValue(i));
             if (!MovementHelper.canWalkThrough(ctx, check)) {

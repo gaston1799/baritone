@@ -41,6 +41,11 @@ public class FillSchematic extends AbstractSchematic {
     }
 
     @Override
+    public boolean preferTopDown() {
+        return bom.getAnyBlockState().isAir();
+    }
+
+    @Override
     public BlockState desiredState(int x, int y, int z, BlockState current, List<BlockState> approxPlaceable) {
         if (bom.matches(current)) {
             return current;
