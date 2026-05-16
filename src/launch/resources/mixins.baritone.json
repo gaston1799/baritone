@@ -18,8 +18,7 @@
     "MixinFireworkRocketEntity",
     "MixinItemStack",
     "MixinLivingEntity",
-    "MixinLootContextBuilder",
-    "MixinLootTable",
+    "MixinLootContext",
     "MixinMinecraft",
     "MixinNetworkManager",
     "MixinPalettedContainer",
@@ -27,7 +26,5 @@
     "MixinPlayerController",
     "MixinScreen",
     "MixinWorldRenderer"
-  ],
-  "mixins": [
   ]
 }

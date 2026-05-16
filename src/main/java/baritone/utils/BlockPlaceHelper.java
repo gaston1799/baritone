@@ -40,8 +40,17 @@ public class BlockPlaceHelper {
             rightClickTimer--;
             return;
         }
+        if (!rightClickRequested || ctx.player().isHandsBusy()) {
+            return;
+        }
+        if (ctx.player().canEat(false) && ctx.player().getMainHandItem().isEdible()) {
+            rightClickTimer = Baritone.settings().rightClickSpeed.value - BASE_PLACE_DELAY;
+            ctx.playerController().syncHeldItem();
+            ctx.playerController().processRightClick(ctx.player(), ctx.world(), InteractionHand.MAIN_HAND);
+            return;
+        }
         HitResult mouseOver = ctx.objectMouseOver();
-        if (!rightClickRequested || ctx.player().isHandsBusy() || mouseOver == null || mouseOver.getType() != HitResult.Type.BLOCK) {
+        if (mouseOver == null || mouseOver.getType() != HitResult.Type.BLOCK) {
             return;
         }
         rightClickTimer = Baritone.settings().rightClickSpeed.value - BASE_PLACE_DELAY;

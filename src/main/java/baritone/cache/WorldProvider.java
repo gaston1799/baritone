@@ -140,7 +140,7 @@ public class WorldProvider implements IWorldProvider {
             String folderName;
             final ServerData serverData = ctx.minecraft().getCurrentServer();
             if (serverData != null) {
-                folderName = serverData.isRealm() ? "realms" : serverData.ip;
+                folderName = serverData.ip == null || serverData.ip.isEmpty() ? "realms" : serverData.ip;
             } else {
                 //replaymod causes null currentServer and false singleplayer.
                 System.out.println("World seems to be a replay. Not loading Baritone cache.");

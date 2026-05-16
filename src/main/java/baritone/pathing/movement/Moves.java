@@ -322,6 +322,486 @@ public enum Moves {
         public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
             MovementParkour.cost(context, x, y, z, Direction.WEST, result);
         }
+    },
+
+    PARKOUR_DIAG2_NORTHEAST(+1, 0, -2) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.NORTH, Direction.EAST, 2, 0, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.NORTH, Direction.EAST, 2, 0, 0, 0, result);
+        }
+    },
+
+    PARKOUR_DIAG2_NORTHWEST(-1, 0, -2) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.NORTH, Direction.WEST, 2, 0, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.NORTH, Direction.WEST, 2, 0, 0, 0, result);
+        }
+    },
+
+    PARKOUR_DIAG2_SOUTHEAST(+1, 0, +2) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.SOUTH, Direction.EAST, 2, 0, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.SOUTH, Direction.EAST, 2, 0, 0, 0, result);
+        }
+    },
+
+    PARKOUR_DIAG2_SOUTHWEST(-1, 0, +2) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.SOUTH, Direction.WEST, 2, 0, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.SOUTH, Direction.WEST, 2, 0, 0, 0, result);
+        }
+    },
+
+    PARKOUR_DIAG2_EASTNORTH(+2, 0, -1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.EAST, Direction.NORTH, 2, 0, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.EAST, Direction.NORTH, 2, 0, 0, 0, result);
+        }
+    },
+
+    PARKOUR_DIAG2_EASTSOUTH(+2, 0, +1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.EAST, Direction.SOUTH, 2, 0, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.EAST, Direction.SOUTH, 2, 0, 0, 0, result);
+        }
+    },
+
+    PARKOUR_DIAG2_WESTNORTH(-2, 0, -1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.WEST, Direction.NORTH, 2, 0, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.WEST, Direction.NORTH, 2, 0, 0, 0, result);
+        }
+    },
+
+    PARKOUR_DIAG2_WESTSOUTH(-2, 0, +1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.WEST, Direction.SOUTH, 2, 0, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.WEST, Direction.SOUTH, 2, 0, 0, 0, result);
+        }
+    },
+
+    PARKOUR_DIAG3_NORTHEAST(+1, 0, -3) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.NORTH, Direction.EAST, 3, 0, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.NORTH, Direction.EAST, 3, 0, 0, 0, result);
+        }
+    },
+
+    PARKOUR_DIAG3_NORTHWEST(-1, 0, -3) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.NORTH, Direction.WEST, 3, 0, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.NORTH, Direction.WEST, 3, 0, 0, 0, result);
+        }
+    },
+
+    PARKOUR_DIAG3_SOUTHEAST(+1, 0, +3) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.SOUTH, Direction.EAST, 3, 0, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.SOUTH, Direction.EAST, 3, 0, 0, 0, result);
+        }
+    },
+
+    PARKOUR_DIAG3_SOUTHWEST(-1, 0, +3) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.SOUTH, Direction.WEST, 3, 0, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.SOUTH, Direction.WEST, 3, 0, 0, 0, result);
+        }
+    },
+
+    PARKOUR_DIAG3_EASTNORTH(+3, 0, -1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.EAST, Direction.NORTH, 3, 0, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.EAST, Direction.NORTH, 3, 0, 0, 0, result);
+        }
+    },
+
+    PARKOUR_DIAG3_EASTSOUTH(+3, 0, +1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.EAST, Direction.SOUTH, 3, 0, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.EAST, Direction.SOUTH, 3, 0, 0, 0, result);
+        }
+    },
+
+    PARKOUR_DIAG3_WESTNORTH(-3, 0, -1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.WEST, Direction.NORTH, 3, 0, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.WEST, Direction.NORTH, 3, 0, 0, 0, result);
+        }
+    },
+
+    PARKOUR_DIAG3_WESTSOUTH(-3, 0, +1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.WEST, Direction.SOUTH, 3, 0, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.WEST, Direction.SOUTH, 3, 0, 0, 0, result);
+        }
+    },
+
+    PARKOUR_ASCEND_DIAG3_NORTHEAST(+1, +1, -3) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.NORTH, Direction.EAST, 3, 1, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.NORTH, Direction.EAST, 3, 1, 0, 0, result);
+        }
+    },
+
+    PARKOUR_ASCEND_DIAG3_NORTHWEST(-1, +1, -3) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.NORTH, Direction.WEST, 3, 1, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.NORTH, Direction.WEST, 3, 1, 0, 0, result);
+        }
+    },
+
+    PARKOUR_ASCEND_DIAG3_SOUTHEAST(+1, +1, +3) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.SOUTH, Direction.EAST, 3, 1, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.SOUTH, Direction.EAST, 3, 1, 0, 0, result);
+        }
+    },
+
+    PARKOUR_ASCEND_DIAG3_SOUTHWEST(-1, +1, +3) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.SOUTH, Direction.WEST, 3, 1, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.SOUTH, Direction.WEST, 3, 1, 0, 0, result);
+        }
+    },
+
+    PARKOUR_ASCEND_DIAG3_EASTNORTH(+3, +1, -1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.EAST, Direction.NORTH, 3, 1, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.EAST, Direction.NORTH, 3, 1, 0, 0, result);
+        }
+    },
+
+    PARKOUR_ASCEND_DIAG3_EASTSOUTH(+3, +1, +1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.EAST, Direction.SOUTH, 3, 1, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.EAST, Direction.SOUTH, 3, 1, 0, 0, result);
+        }
+    },
+
+    PARKOUR_ASCEND_DIAG3_WESTNORTH(-3, +1, -1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.WEST, Direction.NORTH, 3, 1, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.WEST, Direction.NORTH, 3, 1, 0, 0, result);
+        }
+    },
+
+    PARKOUR_ASCEND_DIAG3_WESTSOUTH(-3, +1, +1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.WEST, Direction.SOUTH, 3, 1, 0, 0);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.WEST, Direction.SOUTH, 3, 1, 0, 0, result);
+        }
+    },
+
+    PARKOUR_ICE_ASCEND_NORTHEAST(+1, +1, -4) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.NORTH, Direction.EAST, 4, 1, 1, 1);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.NORTH, Direction.EAST, 4, 1, 1, 1, result);
+        }
+    },
+
+    PARKOUR_ICE_ASCEND_NORTHWEST(-1, +1, -4) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.NORTH, Direction.WEST, 4, 1, 1, 1);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.NORTH, Direction.WEST, 4, 1, 1, 1, result);
+        }
+    },
+
+    PARKOUR_ICE_ASCEND_SOUTHEAST(+1, +1, +4) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.SOUTH, Direction.EAST, 4, 1, 1, 1);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.SOUTH, Direction.EAST, 4, 1, 1, 1, result);
+        }
+    },
+
+    PARKOUR_ICE_ASCEND_SOUTHWEST(-1, +1, +4) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.SOUTH, Direction.WEST, 4, 1, 1, 1);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.SOUTH, Direction.WEST, 4, 1, 1, 1, result);
+        }
+    },
+
+    PARKOUR_ICE_ASCEND_EASTNORTH(+4, +1, -1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.EAST, Direction.NORTH, 4, 1, 1, 1);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.EAST, Direction.NORTH, 4, 1, 1, 1, result);
+        }
+    },
+
+    PARKOUR_ICE_ASCEND_EASTSOUTH(+4, +1, +1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.EAST, Direction.SOUTH, 4, 1, 1, 1);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.EAST, Direction.SOUTH, 4, 1, 1, 1, result);
+        }
+    },
+
+    PARKOUR_ICE_ASCEND_WESTNORTH(-4, +1, -1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.WEST, Direction.NORTH, 4, 1, 1, 1);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.WEST, Direction.NORTH, 4, 1, 1, 1, result);
+        }
+    },
+
+    PARKOUR_ICE_ASCEND_WESTSOUTH(-4, +1, +1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonal.cost(context, src, Direction.WEST, Direction.SOUTH, 4, 1, 1, 1);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonal.cost(context, x, y, z, Direction.WEST, Direction.SOUTH, 4, 1, 1, 1, result);
+        }
+    },
+
+    PARKOUR_ICE_NORTHEAST(+1, 0, -4) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonalIce.cost(context, src, Direction.NORTH, Direction.EAST);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonalIce.cost(context, x, y, z, Direction.NORTH, Direction.EAST, result);
+        }
+    },
+
+    PARKOUR_ICE_NORTHWEST(-1, 0, -4) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonalIce.cost(context, src, Direction.NORTH, Direction.WEST);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonalIce.cost(context, x, y, z, Direction.NORTH, Direction.WEST, result);
+        }
+    },
+
+    PARKOUR_ICE_SOUTHEAST(+1, 0, +4) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonalIce.cost(context, src, Direction.SOUTH, Direction.EAST);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonalIce.cost(context, x, y, z, Direction.SOUTH, Direction.EAST, result);
+        }
+    },
+
+    PARKOUR_ICE_SOUTHWEST(-1, 0, +4) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonalIce.cost(context, src, Direction.SOUTH, Direction.WEST);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonalIce.cost(context, x, y, z, Direction.SOUTH, Direction.WEST, result);
+        }
+    },
+
+    PARKOUR_ICE_EASTNORTH(+4, 0, -1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonalIce.cost(context, src, Direction.EAST, Direction.NORTH);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonalIce.cost(context, x, y, z, Direction.EAST, Direction.NORTH, result);
+        }
+    },
+
+    PARKOUR_ICE_EASTSOUTH(+4, 0, +1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonalIce.cost(context, src, Direction.EAST, Direction.SOUTH);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonalIce.cost(context, x, y, z, Direction.EAST, Direction.SOUTH, result);
+        }
+    },
+
+    PARKOUR_ICE_WESTNORTH(-4, 0, -1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonalIce.cost(context, src, Direction.WEST, Direction.NORTH);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonalIce.cost(context, x, y, z, Direction.WEST, Direction.NORTH, result);
+        }
+    },
+
+    PARKOUR_ICE_WESTSOUTH(-4, 0, +1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkourDiagonalIce.cost(context, src, Direction.WEST, Direction.SOUTH);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkourDiagonalIce.cost(context, x, y, z, Direction.WEST, Direction.SOUTH, result);
+        }
     };
 
     public final boolean dynamicXZ;

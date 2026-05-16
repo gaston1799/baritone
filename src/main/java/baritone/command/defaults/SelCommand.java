@@ -76,9 +76,9 @@ public class SelCommand extends Command {
                 float opacity = Baritone.settings().selectionOpacity.value;
                 float lineWidth = Baritone.settings().selectionLineWidth.value;
                 boolean ignoreDepth = Baritone.settings().renderSelectionIgnoreDepth.value;
-                BufferBuilder bufferBuilder = IRenderer.startLines(color, opacity, lineWidth, ignoreDepth);
-                IRenderer.emitAABB(bufferBuilder, event.getModelViewStack(), new AABB(pos1));
-                IRenderer.endLines(bufferBuilder, ignoreDepth);
+                IRenderer.startLines(color, opacity, lineWidth, ignoreDepth);
+                IRenderer.emitAABB(event.getModelViewStack(), new AABB(pos1));
+                IRenderer.endLines(ignoreDepth);
             }
         });
     }

@@ -27,16 +27,15 @@ import baritone.api.event.events.type.EventState;
 import baritone.api.utils.Pair;
 import baritone.cache.CachedChunk;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.multiplayer.ClientCommonPacketListenerImpl;
 import net.minecraft.client.multiplayer.ClientPacketListener;
-import net.minecraft.client.multiplayer.CommonListenerCookie;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.Connection;
 import net.minecraft.network.protocol.game.*;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.state.BlockState;
+import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -49,7 +48,7 @@ import java.util.List;
  * @since 8/3/2018
  */
 @Mixin(ClientPacketListener.class)
-public abstract class MixinClientPlayNetHandler extends ClientCommonPacketListenerImpl {
+public class MixinClientPlayNetHandler {
 
     // unused lol
     /*@Inject(
@@ -75,9 +74,9 @@ public abstract class MixinClientPlayNetHandler extends ClientCommonPacketListen
         }
     }*/
 
-    protected MixinClientPlayNetHandler(final Minecraft arg, final Connection arg2, final CommonListenerCookie arg3) {
-        super(arg, arg2, arg3);
-    }
+    @Shadow
+    @Final
+    private Minecraft minecraft;
 
     @Inject(
             method = "sendChat(Ljava/lang/String;)V",
@@ -125,7 +124,7 @@ public abstract class MixinClientPlayNetHandler extends ClientCommonPacketListen
             LocalPlayer player = ibaritone.getPlayerContext().player();
             if (player != null && player.connection == (ClientPacketListener) (Object) this) {
                 ibaritone.getGameEventHandler().onChunkEvent(
-                        new ChunkEvent(EventState.PRE, ChunkEvent.Type.UNLOAD, packet.pos().x, packet.pos().z)
+                        new ChunkEvent(EventState.PRE, ChunkEvent.Type.UNLOAD, packet.getX(), packet.getZ())
                 );
             }
         }
@@ -140,7 +139,7 @@ public abstract class MixinClientPlayNetHandler extends ClientCommonPacketListen
             LocalPlayer player = ibaritone.getPlayerContext().player();
             if (player != null && player.connection == (ClientPacketListener) (Object) this) {
                 ibaritone.getGameEventHandler().onChunkEvent(
-                        new ChunkEvent(EventState.POST, ChunkEvent.Type.UNLOAD, packet.pos().x, packet.pos().z)
+                        new ChunkEvent(EventState.POST, ChunkEvent.Type.UNLOAD, packet.getX(), packet.getZ())
                 );
             }
         }

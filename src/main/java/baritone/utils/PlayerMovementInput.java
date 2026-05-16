@@ -18,9 +18,10 @@
 package baritone.utils;
 
 import baritone.api.utils.input.Input;
-import net.minecraft.client.player.ClientInput;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
 
-public class PlayerMovementInput extends ClientInput {
+public class PlayerMovementInput extends net.minecraft.client.player.Input {
 
     private final InputOverrideHandler handler;
 
@@ -29,39 +30,35 @@ public class PlayerMovementInput extends ClientInput {
     }
 
     @Override
-    public void tick() {
+    public void tick(boolean p_225607_1_, float f) {
         this.leftImpulse = 0.0F;
         this.forwardImpulse = 0.0F;
-        boolean jumping = handler.isInputForcedDown(Input.JUMP); // oppa gangnam style
 
-        boolean up = handler.isInputForcedDown(Input.MOVE_FORWARD);
-        if (up) {
+        this.jumping = handler.isInputForcedDown(Input.JUMP); // oppa gangnam style
+
+        if (this.up = handler.isInputForcedDown(Input.MOVE_FORWARD)) {
             this.forwardImpulse++;
         }
 
-        boolean down = handler.isInputForcedDown(Input.MOVE_BACK);
-        if (down) {
+        if (this.down = handler.isInputForcedDown(Input.MOVE_BACK)) {
             this.forwardImpulse--;
         }
 
-        boolean left = handler.isInputForcedDown(Input.MOVE_LEFT);
-        if (left) {
+        if (this.left = handler.isInputForcedDown(Input.MOVE_LEFT)) {
             this.leftImpulse++;
         }
 
-        boolean right = handler.isInputForcedDown(Input.MOVE_RIGHT);
-        if (right) {
+        if (this.right = handler.isInputForcedDown(Input.MOVE_RIGHT)) {
             this.leftImpulse--;
         }
 
-        boolean sneaking = handler.isInputForcedDown(Input.SNEAK);
-        if (sneaking) {
-            this.leftImpulse *= 0.3D;
-            this.forwardImpulse *= 0.3D;
+        if (this.shiftKeyDown = handler.isInputForcedDown(Input.SNEAK)) {
+            LocalPlayer player = Minecraft.getInstance().player;
+            boolean underwaterSwimming = player != null && player.isInWater() && !player.onGround();
+            if (!underwaterSwimming) {
+                this.leftImpulse *= 0.3D;
+                this.forwardImpulse *= 0.3D;
+            }
         }
-
-        boolean sprinting = handler.isInputForcedDown(Input.SPRINT);
-
-        this.keyPresses = new net.minecraft.world.entity.player.Input(up, down, left, right, jumping, sneaking, sprinting);
     }
 }

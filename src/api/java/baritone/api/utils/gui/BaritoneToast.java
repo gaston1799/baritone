@@ -18,12 +18,14 @@
 package baritone.api.utils.gui;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.network.chat.Component;
 
 public class BaritoneToast {
-    private static final SystemToast.SystemToastId BARITONE_TOAST_ID = new SystemToast.SystemToastId(5000L);
     public static void addOrUpdate(Component title, Component subtitle) {
-        SystemToast.addOrUpdate(Minecraft.getInstance().getToastManager(), BARITONE_TOAST_ID, title, subtitle);
+        // The toast API changed across recent Minecraft versions; keep this hook non-fatal.
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player != null) {
+            minecraft.player.displayClientMessage(title.copy().append(" ").append(subtitle), false);
+        }
     }
 }

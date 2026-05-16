@@ -28,24 +28,31 @@ import baritone.api.utils.BlockOptionalMeta;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class MineCommand extends Command {
 
     public MineCommand(IBaritone baritone) {
-        super(baritone, "mine");
+        super(baritone, MineTargetPresets.commandNames());
     }
 
     @Override
     public void execute(String label, IArgConsumer args) throws CommandException {
         int quantity = args.getAsOrDefault(Integer.class, 0);
-        args.requireMin(1);
         List<BlockOptionalMeta> boms = new ArrayList<>();
-        while (args.hasAny()) {
-            boms.add(args.getDatatypeFor(ForBlockOptionalMeta.INSTANCE));
+        if (MineTargetPresets.isCommandAlias(label)) {
+            boms.addAll(MineTargetPresets.resolve(label));
         }
+        if (boms.isEmpty()) {
+            args.requireMin(1);
+        }
+        while (args.hasAny()) {
+            appendTarget(args, boms);
+        }
+        boms = MineTargetPresets.deduplicate(boms);
         BaritoneAPI.getProvider().getWorldScanner().repack(ctx);
-        logDirect(String.format("Mining %s", boms.toString()));
+        logDirect(String.format("Mining %s", describeTargets(boms)));
         baritone.getMineProcess().mine(quantity, boms.toArray(new BlockOptionalMeta[0]));
     }
 
@@ -53,9 +60,15 @@ public class MineCommand extends Command {
     public Stream<String> tabComplete(String label, IArgConsumer args) throws CommandException {
         args.getAsOrDefault(Integer.class, 0);
         while (args.has(2)) {
-            args.getDatatypeFor(ForBlockOptionalMeta.INSTANCE);
+            appendTarget(args, new ArrayList<>());
         }
-        return args.tabCompleteDatatype(ForBlockOptionalMeta.INSTANCE);
+        String prefix = args.hasAny() ? args.peekString() : "";
+        return Stream.concat(
+                        MineTargetPresets.tabComplete(prefix),
+                        args.tabCompleteDatatype(ForBlockOptionalMeta.INSTANCE)
+                )
+                .distinct()
+                .sorted(String.CASE_INSENSITIVE_ORDER);
     }
 
     @Override
@@ -73,7 +86,26 @@ public class MineCommand extends Command {
                 "Also see the legitMine settings (see #set l legitMine).",
                 "",
                 "Usage:",
-                "> mine diamond_ore - Mines all diamonds it can find."
+                "> mine diamond_ore - Mines that ore family, including deepslate variants when they exist.",
+                "> mine logs - Mines all log and stem types.",
+                "> logs 64 - Shorthand for mining up to 64 logs of any wood type."
         );
+    }
+
+    private void appendTarget(IArgConsumer args, List<BlockOptionalMeta> targets) throws CommandException {
+        List<BlockOptionalMeta> preset = MineTargetPresets.resolve(args.peekString());
+        if (preset != null) {
+            args.getString();
+            targets.addAll(preset);
+            return;
+        }
+        targets.add(args.getDatatypeFor(ForBlockOptionalMeta.INSTANCE));
+    }
+
+    private String describeTargets(List<BlockOptionalMeta> targets) {
+        return targets.stream()
+                .map(BlockOptionalMeta::getBlock)
+                .map(block -> net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(block).toString())
+                .collect(Collectors.joining(", "));
     }
 }

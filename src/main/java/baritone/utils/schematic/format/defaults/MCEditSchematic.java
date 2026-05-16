@@ -68,9 +68,7 @@ public final class MCEditSchematic extends StaticSchematic {
                     ResourceLocation blockKey = ResourceLocation.tryParse(ItemIdFix.getItem(blockID));
                     Block block = blockKey == null
                         ? Blocks.AIR
-                        : BuiltInRegistries.BLOCK.get(blockKey)
-                            .map(Holder.Reference::value)
-                            .orElse(Blocks.AIR);
+                        : BuiltInRegistries.BLOCK.getOptional(blockKey).orElse(Blocks.AIR);
 
 //                    int meta = metadata[blockInd] & 0xFF;
 //                    this.states[x][z][y] = block.getStateFromMeta(meta);

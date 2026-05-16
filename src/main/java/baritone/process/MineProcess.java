@@ -30,11 +30,15 @@ import baritone.pathing.movement.CalculationContext;
 import baritone.pathing.movement.MovementHelper;
 import baritone.utils.BaritoneProcessHelper;
 import baritone.utils.BlockStateInterface;
+import baritone.utils.craft.BlockDropHelper;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.AirBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -53,6 +57,12 @@ import static baritone.api.pathing.movement.ActionCosts.COST_INF;
  */
 public final class MineProcess extends BaritoneProcessHelper implements IMineProcess {
 
+    public enum LegitMineMode {
+        FOLLOW_SETTING,
+        FORCE_LEGIT,
+        FORCE_NORMAL
+    }
+
     private BlockOptionalMetaLookup filter;
     private List<BlockPos> knownOreLocations;
     private List<BlockPos> blacklist; // inaccessible
@@ -61,6 +71,9 @@ public final class MineProcess extends BaritoneProcessHelper implements IMinePro
     private GoalRunAway branchPointRunaway;
     private int desiredQuantity;
     private int tickCount;
+    private LegitMineMode legitMineMode = LegitMineMode.FOLLOW_SETTING;
+    private Set<Item> desiredQuantityItems;
+    private Set<Item> targetDropItems;
 
     public MineProcess(Baritone baritone) {
         super(baritone);
@@ -74,9 +87,7 @@ public final class MineProcess extends BaritoneProcessHelper implements IMinePro
     @Override
     public PathingCommand onTick(boolean calcFailed, boolean isSafeToCancel) {
         if (desiredQuantity > 0) {
-            int curr = ctx.player().getInventory().items.stream()
-                    .filter(stack -> filter.has(stack))
-                    .mapToInt(ItemStack::getCount).sum();
+            int curr = countInventoryItems(ctx.player().getInventory().items, filter, targetDropItems);
             if (curr >= desiredQuantity) {
                 logDirect("Have " + curr + " valid items");
                 cancel();
@@ -108,7 +119,7 @@ public final class MineProcess extends BaritoneProcessHelper implements IMinePro
             CalculationContext context = new CalculationContext(baritone, true);
             Baritone.getExecutor().execute(() -> rescan(curr, context));
         }
-        if (Baritone.settings().legitMine.value) {
+        if (isLegitMineEnabled()) {
             if (!addNearby()) {
                 cancel();
                 return null;
@@ -179,7 +190,7 @@ public final class MineProcess extends BaritoneProcessHelper implements IMinePro
             return null;
         }
 
-        boolean legit = Baritone.settings().legitMine.value;
+        boolean legit = isLegitMineEnabled();
         List<BlockPos> locs = knownOreLocations;
         if (!locs.isEmpty()) {
             CalculationContext context = new CalculationContext(baritone);
@@ -228,11 +239,14 @@ public final class MineProcess extends BaritoneProcessHelper implements IMinePro
         if (filter == null) {
             return;
         }
-        if (Baritone.settings().legitMine.value) {
+        if (isLegitMineEnabled()) {
             return;
         }
         List<BlockPos> dropped = droppedItemsScan();
         List<BlockPos> locs = searchWorld(context, filter, Baritone.settings().mineMaxOreLocationsCount.value, already, blacklist, dropped);
+        if (Baritone.settings().veinMine.value) {
+            locs = expandVein(locs, context);
+        }
         locs.addAll(dropped);
         if (locs.isEmpty() && !Baritone.settings().exploreForBlocks.value) {
             logDirect("No locations for " + filter + " known, cancelling");
@@ -245,98 +259,35 @@ public final class MineProcess extends BaritoneProcessHelper implements IMinePro
         knownOreLocations = locs;
     }
 
-    private boolean internalMiningGoal(BlockPos pos, CalculationContext context, List<BlockPos> locs) {
-        // Here, BlockStateInterface is used because the position may be in a cached chunk (the targeted block is one that is kept track of)
-        if (locs.contains(pos)) {
-            return true;
+    private List<BlockPos> expandVein(List<BlockPos> seed, CalculationContext context) {
+        int maxExpand = Math.max(0, Baritone.settings().veinMineMaxExpand.value);
+        Set<BlockPos> result = new LinkedHashSet<>(seed);
+        Set<BlockPos> blacklisted = new HashSet<>(blacklist != null ? blacklist : Collections.emptyList());
+        ArrayDeque<BlockPos> frontier = new ArrayDeque<>(seed);
+        int added = 0;
+        while (!frontier.isEmpty() && added < maxExpand) {
+            BlockPos pos = frontier.poll();
+            for (Direction dir : Direction.values()) {
+                BlockPos neighbor = pos.relative(dir);
+                if (blacklisted.contains(neighbor) || result.contains(neighbor)) {
+                    continue;
+                }
+                BlockState state = context.bsi.get0(neighbor.getX(), neighbor.getY(), neighbor.getZ());
+                if (filter.has(state)) {
+                    result.add(neighbor);
+                    frontier.add(neighbor);
+                    added++;
+                    if (added >= maxExpand) {
+                        break;
+                    }
+                }
+            }
         }
-        BlockState state = context.bsi.get0(pos);
-        if (Baritone.settings().internalMiningAirException.value && state.getBlock() instanceof AirBlock) {
-            return true;
-        }
-        return filter.has(state) && plausibleToBreak(context, pos);
+        return new ArrayList<>(result);
     }
 
     private Goal coalesce(BlockPos loc, List<BlockPos> locs, CalculationContext context) {
-        boolean assumeVerticalShaftMine = !(baritone.bsi.get0(loc.above()).getBlock() instanceof FallingBlock);
-        if (!Baritone.settings().forceInternalMining.value) {
-            if (assumeVerticalShaftMine) {
-                // we can get directly below the block
-                return new GoalThreeBlocks(loc);
-            } else {
-                // we need to get feet or head into the block
-                return new GoalTwoBlocks(loc);
-            }
-        }
-        boolean upwardGoal = internalMiningGoal(loc.above(), context, locs);
-        boolean downwardGoal = internalMiningGoal(loc.below(), context, locs);
-        boolean doubleDownwardGoal = internalMiningGoal(loc.below(2), context, locs);
-        if (upwardGoal == downwardGoal) { // symmetric
-            if (doubleDownwardGoal && assumeVerticalShaftMine) {
-                // we have a checkerboard like pattern
-                // this one, and the one two below it
-                // therefore it's fine to path to immediately below this one, since your feet will be in the doubleDownwardGoal
-                // but only if assumeVerticalShaftMine
-                return new GoalThreeBlocks(loc);
-            } else {
-                // this block has nothing interesting two below, but is symmetric vertically so we can get either feet or head into it
-                return new GoalTwoBlocks(loc);
-            }
-        }
-        if (upwardGoal) {
-            // downwardGoal known to be false
-            // ignore the gap then potential doubleDownward, because we want to path feet into this one and head into upwardGoal
-            return new GoalBlock(loc);
-        }
-        // upwardGoal known to be false, downwardGoal known to be true
-        if (doubleDownwardGoal && assumeVerticalShaftMine) {
-            // this block and two below it are goals
-            // path into the center of the one below, because that includes directly below this one
-            return new GoalTwoBlocks(loc.below());
-        }
-        // upwardGoal false, downwardGoal true, doubleDownwardGoal false
-        // just this block and the one immediately below, no others
-        return new GoalBlock(loc.below());
-    }
-
-    private static class GoalThreeBlocks extends GoalTwoBlocks {
-
-        public GoalThreeBlocks(BlockPos pos) {
-            super(pos);
-        }
-
-        @Override
-        public boolean isInGoal(int x, int y, int z) {
-            return x == this.x && (y == this.y || y == this.y - 1 || y == this.y - 2) && z == this.z;
-        }
-
-        @Override
-        public double heuristic(int x, int y, int z) {
-            int xDiff = x - this.x;
-            int yDiff = y - this.y;
-            int zDiff = z - this.z;
-            return GoalBlock.calculate(xDiff, yDiff < -1 ? yDiff + 2 : yDiff == -1 ? 0 : yDiff, zDiff);
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            return super.equals(o);
-        }
-
-        @Override
-        public int hashCode() {
-            return super.hashCode() * 393857768;
-        }
-
-        @Override
-        public String toString() {
-            return String.format(
-                    "GoalThreeBlocks{x=%s,y=%s,z=%s}",
-                    SettingsUtil.maybeCensor(x),
-                    SettingsUtil.maybeCensor(y),
-                    SettingsUtil.maybeCensor(z)
-            );
-        }
+        return MiningGoalHelper.goalFor(loc, locs, context, filter);
     }
 
     public List<BlockPos> droppedItemsScan() {
@@ -347,13 +298,23 @@ public final class MineProcess extends BaritoneProcessHelper implements IMinePro
         for (Entity entity : ((ClientLevel) ctx.world()).entitiesForRendering()) {
             if (entity instanceof ItemEntity) {
                 ItemEntity ei = (ItemEntity) entity;
-                if (filter.has(ei.getItem())) {
+                if (matchesMineTargetDrop(ei.getItem())) {
                     ret.add(entity.blockPosition());
                 }
             }
         }
         ret.addAll(anticipatedDrops.keySet());
         return ret;
+    }
+
+    private boolean matchesMineTargetDrop(ItemStack stack) {
+        if (stack.isEmpty()) {
+            return false;
+        }
+        if (filter != null && filter.has(stack)) {
+            return true;
+        }
+        return targetDropItems != null && targetDropItems.contains(stack.getItem());
     }
 
     public static List<BlockPos> searchWorld(CalculationContext ctx, BlockOptionalMetaLookup filter, int max, List<BlockPos> alreadyKnown, List<BlockPos> blacklist, List<BlockPos> dropped) {
@@ -443,9 +404,12 @@ public final class MineProcess extends BaritoneProcessHelper implements IMinePro
                 .filter(pos -> !ctx.bsi.worldContainsLoadedChunk(pos.getX(), pos.getZ()) || filter.has(ctx.get(pos.getX(), pos.getY(), pos.getZ())) || dropped.contains(pos))
 
                 // remove any that are implausible to mine (encased in bedrock, or touching lava)
-                .filter(pos -> MineProcess.plausibleToBreak(ctx, pos))
+                .filter(pos -> shouldBypassMiningChecks(pos, dropped) || MineProcess.plausibleToBreak(ctx, pos))
 
                 .filter(pos -> {
+                    if (shouldBypassMiningChecks(pos, dropped)) {
+                        return true;
+                    }
                     if (Baritone.settings().allowOnlyExposedOres.value) {
                         return isNextToAir(ctx, pos);
                     } else {
@@ -466,6 +430,10 @@ public final class MineProcess extends BaritoneProcessHelper implements IMinePro
             return locs.subList(0, max);
         }
         return locs;
+    }
+
+    static boolean shouldBypassMiningChecks(BlockPos pos, List<BlockPos> dropped) {
+        return dropped.contains(pos);
     }
 
     public static boolean isNextToAir(CalculationContext ctx, BlockPos pos) {
@@ -504,10 +472,30 @@ public final class MineProcess extends BaritoneProcessHelper implements IMinePro
 
     @Override
     public void mine(int quantity, BlockOptionalMetaLookup filter) {
+        mine(quantity, LegitMineMode.FOLLOW_SETTING, filter);
+    }
+
+    public void mine(int quantity, LegitMineMode mode, BlockOptionalMetaLookup filter) {
+        mine(quantity, mode, filter, (Set<Item>) null);
+    }
+
+    public void mine(int quantity, LegitMineMode mode, BlockOptionalMetaLookup filter, Item... countedItems) {
+        Set<Item> items = null;
+        if (countedItems != null && countedItems.length > 0) {
+            items = new LinkedHashSet<>(Arrays.asList(countedItems));
+            items.remove(null);
+        }
+        mine(quantity, mode, filter, items);
+    }
+
+    private void mine(int quantity, LegitMineMode mode, BlockOptionalMetaLookup filter, Set<Item> countedItems) {
         this.filter = filter;
         if (this.filterFilter() == null) {
             this.filter = null;
         }
+        this.legitMineMode = mode == null ? LegitMineMode.FOLLOW_SETTING : mode;
+        this.desiredQuantityItems = countedItems == null || countedItems.isEmpty() ? null : countedItems;
+        this.targetDropItems = this.desiredQuantityItems == null ? possibleDropItems(this.filter) : this.desiredQuantityItems;
         this.desiredQuantity = quantity;
         this.knownOreLocations = new ArrayList<>();
         this.blacklist = new ArrayList<>();
@@ -517,6 +505,50 @@ public final class MineProcess extends BaritoneProcessHelper implements IMinePro
         if (filter != null) {
             rescan(new ArrayList<>(), new CalculationContext(baritone));
         }
+    }
+
+    private static Set<Item> possibleDropItems(BlockOptionalMetaLookup filter) {
+        if (filter == null) {
+            return Collections.emptySet();
+        }
+        Set<Item> items = new LinkedHashSet<>();
+        for (BlockOptionalMeta target : filter.blocks()) {
+            addKnownMineDrops(items, target.getBlock());
+            for (ItemStack drop : BlockDropHelper.getPossibleDroppedStacks(target.getBlock())) {
+                if (!drop.isEmpty()) {
+                    items.add(drop.getItem());
+                }
+            }
+        }
+        return items;
+    }
+
+    private static void addKnownMineDrops(Set<Item> items, Block block) {
+        if (block == Blocks.COAL_ORE || block == Blocks.DEEPSLATE_COAL_ORE) {
+            items.add(Items.COAL);
+        } else if (block == Blocks.DIAMOND_ORE || block == Blocks.DEEPSLATE_DIAMOND_ORE) {
+            items.add(Items.DIAMOND);
+        } else if (block == Blocks.EMERALD_ORE || block == Blocks.DEEPSLATE_EMERALD_ORE) {
+            items.add(Items.EMERALD);
+        } else if (block == Blocks.LAPIS_ORE || block == Blocks.DEEPSLATE_LAPIS_ORE) {
+            items.add(Items.LAPIS_LAZULI);
+        } else if (block == Blocks.REDSTONE_ORE || block == Blocks.DEEPSLATE_REDSTONE_ORE) {
+            items.add(Items.REDSTONE);
+        } else if (block == Blocks.IRON_ORE || block == Blocks.DEEPSLATE_IRON_ORE) {
+            items.add(Items.RAW_IRON);
+        } else if (block == Blocks.COPPER_ORE || block == Blocks.DEEPSLATE_COPPER_ORE) {
+            items.add(Items.RAW_COPPER);
+        } else if (block == Blocks.GOLD_ORE || block == Blocks.DEEPSLATE_GOLD_ORE) {
+            items.add(Items.RAW_GOLD);
+        } else if (block == Blocks.NETHER_QUARTZ_ORE) {
+            items.add(Items.QUARTZ);
+        } else if (block == Blocks.NETHER_GOLD_ORE) {
+            items.add(Items.GOLD_NUGGET);
+        }
+    }
+
+    public void mine(int quantity, LegitMineMode mode, BlockOptionalMeta... filter) {
+        mine(quantity, mode, filter == null ? null : new BlockOptionalMetaLookup(filter));
     }
 
     private BlockOptionalMetaLookup filterFilter() {
@@ -535,5 +567,25 @@ public final class MineProcess extends BaritoneProcessHelper implements IMinePro
             return f;
         }
         return filter;
+    }
+
+    private boolean isLegitMineEnabled() {
+        switch (legitMineMode) {
+            case FORCE_LEGIT:
+                return true;
+            case FORCE_NORMAL:
+                return false;
+            case FOLLOW_SETTING:
+            default:
+                return Baritone.settings().legitMine.value;
+        }
+    }
+
+    static int countInventoryItems(List<ItemStack> stacks, BlockOptionalMetaLookup filter, Set<Item> countedItems) {
+        return stacks.stream()
+                .filter(stack -> !stack.isEmpty())
+                .filter(stack -> countedItems != null ? countedItems.contains(stack.getItem()) : filter != null && (filter.has(stack) || possibleDropItems(filter).contains(stack.getItem())))
+                .mapToInt(ItemStack::getCount)
+                .sum();
     }
 }

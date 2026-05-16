@@ -22,7 +22,6 @@ import baritone.api.command.exception.CommandException;
 import baritone.api.command.exception.CommandInvalidTypeException;
 import baritone.api.utils.Helper;
 
-import java.awt.*;
 import java.util.Arrays;
 import java.util.List;
 import java.util.function.Function;

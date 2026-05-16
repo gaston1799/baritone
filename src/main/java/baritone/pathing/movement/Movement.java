@@ -123,12 +123,16 @@ public abstract class Movement implements IMovement, MovementHelper {
     public MovementStatus update() {
         ctx.player().getAbilities().flying = false;
         currentState = updateState(currentState);
-        if (MovementHelper.isLiquid(ctx, ctx.playerFeet()) && ctx.player().position().y < dest.y + 0.6) {
+        boolean underwaterSwimming = MovementHelper.applyUnderwaterSwimmingInputs(ctx, currentState, dest);
+        if (!underwaterSwimming && MovementHelper.isLiquid(ctx, ctx.playerFeet()) && ctx.player().position().y < dest.y + 0.6) {
             currentState.setInput(Input.JUMP, true);
         }
         if (ctx.player().isInWall()) {
             ctx.getSelectedBlock().ifPresent(pos -> MovementHelper.switchToBestToolFor(ctx, BlockStateInterface.get(ctx, pos)));
             currentState.setInput(Input.CLICK_LEFT, true);
+        }
+        if (MovementHelper.isConsumingItem(ctx)) {
+            currentState.setInput(Input.JUMP, false);
         }
 
         // If the movement target has to force the new rotations, or we aren't using silent move, then force the rotations
@@ -292,5 +296,27 @@ public abstract class Movement implements IMovement, MovementHelper {
 
     public BlockPos[] toBreakAll() {
         return positionsToBreak;
+    }
+
+    protected static BetterBlockPos[] topDownClearance(BetterBlockPos base, int height) {
+        BetterBlockPos[] result = new BetterBlockPos[Math.max(0, height)];
+        for (int i = 0; i < result.length; i++) {
+            result[i] = base.above(result.length - i - 1);
+        }
+        return result;
+    }
+
+    protected static BetterBlockPos[] concat(BetterBlockPos[]... arrays) {
+        int totalLength = 0;
+        for (BetterBlockPos[] array : arrays) {
+            totalLength += array.length;
+        }
+        BetterBlockPos[] result = new BetterBlockPos[totalLength];
+        int offset = 0;
+        for (BetterBlockPos[] array : arrays) {
+            System.arraycopy(array, 0, result, offset, array.length);
+            offset += array.length;
+        }
+        return result;
     }
 }

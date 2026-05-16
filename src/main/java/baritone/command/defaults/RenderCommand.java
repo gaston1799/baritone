@@ -40,10 +40,10 @@ public class RenderCommand extends Command {
         int renderDistance = (ctx.minecraft().options.renderDistance().get() + 1) * 16;
         ctx.minecraft().levelRenderer.setBlocksDirty(
                 origin.x - renderDistance,
-                ctx.world().getMinY(),
+                ctx.world().getMinBuildHeight(),
                 origin.z - renderDistance,
                 origin.x + renderDistance,
-                ctx.world().getMaxY(),
+                ctx.world().getMaxBuildHeight(),
                 origin.z + renderDistance
         );
         logDirect("Done");

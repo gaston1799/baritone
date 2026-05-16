@@ -35,6 +35,10 @@ import baritone.utils.BlockStateInterface;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.util.Tuple;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.phys.Vec3;
 import java.util.*;
 
@@ -49,6 +53,9 @@ public class PathExecutor implements IPathExecutor, Helper {
 
     private static final double MAX_MAX_DIST_FROM_PATH = 3;
     private static final double MAX_DIST_FROM_PATH = 2;
+    private static final int MIN_SPRINT_JUMP_RUN_LENGTH = 3;
+    private static final double SPRINT_JUMP_TAKEOFF_DISTANCE = 0.15D;
+    private static final boolean CHAT_SPRINT_DEBUG = false;
 
     /**
      * Default value is equal to 10 seconds. It's find to decrease it, but it must be at least 5.5s (110 ticks).
@@ -75,12 +82,19 @@ public class PathExecutor implements IPathExecutor, Helper {
     private final IPlayerContext ctx;
 
     private boolean sprintNextTick;
+    private int sprintJumpTriggeredMovement = -1;
+    private boolean sprintJumpCarryover;
+    private Boolean lastLoggedSprintState;
+    private String sprintStateReason = "not sprinting";
+    private boolean lastWaterSprintSwimState;
+    private boolean lastWaterSubmergeState;
 
     public PathExecutor(PathingBehavior behavior, IPath path) {
         this.behavior = behavior;
         this.ctx = behavior.ctx;
         this.path = path;
         this.pathPosition = 0;
+        this.sprintNextTick = ctx.player() != null && ctx.player().isSprinting();
     }
 
     /**
@@ -94,11 +108,13 @@ public class PathExecutor implements IPathExecutor, Helper {
             pathPosition++;
         }
         if (pathPosition >= path.length()) {
+            logSprintStateIfChanged(false, "path finished");
             return true; // stop bugging me, I'm done
         }
         Movement movement = (Movement) path.movements().get(pathPosition);
         BetterBlockPos whereAmI = ctx.playerFeet();
-        if (!movement.getValidPositions().contains(whereAmI)) {
+        boolean deferMidairReconciliation = shouldDeferMidairReconciliation(movement);
+        if (!deferMidairReconciliation && !movement.getValidPositions().contains(whereAmI)) {
             for (int i = 0; i < pathPosition && i < path.length(); i++) {//this happens for example when you lag out and get teleported back a couple blocks
                 if (((Movement) path.movements().get(i)).getValidPositions().contains(whereAmI)) {
                     int previousPos = pathPosition;
@@ -107,7 +123,6 @@ public class PathExecutor implements IPathExecutor, Helper {
                         path.movements().get(j).reset();
                     }
                     onChangeInPathPosition();
-                    onTick();
                     return false;
                 }
             }
@@ -120,27 +135,30 @@ public class PathExecutor implements IPathExecutor, Helper {
                     //System.out.println("Double skip sundae");
                     pathPosition = i - 1;
                     onChangeInPathPosition();
-                    onTick();
                     return false;
                 }
             }
         }
-        Tuple<Double, BlockPos> status = closestPathPos(path);
-        if (possiblyOffPath(status, MAX_DIST_FROM_PATH)) {
-            ticksAway++;
-            System.out.println("FAR AWAY FROM PATH FOR " + ticksAway + " TICKS. Current distance: " + status.getA() + ". Threshold: " + MAX_DIST_FROM_PATH);
-            if (ticksAway > MAX_TICKS_AWAY) {
-                logDebug("Too far away from path for too long, cancelling path");
-                cancel();
+        if (deferMidairReconciliation) {
+            ticksAway = 0;
+        } else {
+            Tuple<Double, BlockPos> status = closestPathPos(path);
+            if (possiblyOffPath(status, MAX_DIST_FROM_PATH)) {
+                ticksAway++;
+                System.out.println("FAR AWAY FROM PATH FOR " + ticksAway + " TICKS. Current distance: " + status.getA() + ". Threshold: " + MAX_DIST_FROM_PATH);
+                if (ticksAway > MAX_TICKS_AWAY) {
+                    logDebug("Too far away from path for too long, cancelling path");
+                    cancel("too far from path too long");
+                    return false;
+                }
+            } else {
+                ticksAway = 0;
+            }
+            if (possiblyOffPath(status, MAX_MAX_DIST_FROM_PATH)) { // ok, stop right away, we're way too far.
+                logDebug("too far from path");
+                cancel("too far from path");
                 return false;
             }
-        } else {
-            ticksAway = 0;
-        }
-        if (possiblyOffPath(status, MAX_MAX_DIST_FROM_PATH)) { // ok, stop right away, we're way too far.
-            logDebug("too far from path");
-            cancel();
-            return false;
         }
         //long start = System.nanoTime() / 1000000L;
         BlockStateInterface bsi = new BlockStateInterface(ctx);
@@ -186,6 +204,7 @@ public class PathExecutor implements IPathExecutor, Helper {
             IMovement next = path.movements().get(pathPosition + 1);
             if (!behavior.baritone.bsi.worldContainsLoadedChunk(next.getDest().x, next.getDest().z)) {
                 logDebug("Pausing since destination is at edge of loaded chunks");
+                logSprintStateIfChanged(false, "loaded chunk edge");
                 clearKeys();
                 return true;
             }
@@ -198,7 +217,7 @@ public class PathExecutor implements IPathExecutor, Helper {
             for (int i = 1; i < Baritone.settings().costVerificationLookahead.value && pathPosition + i < path.length() - 1; i++) {
                 if (((Movement) path.movements().get(pathPosition + i)).calculateCost(behavior.secretInternalGetCalculationContext()) >= ActionCosts.COST_INF && canCancel) {
                     logDebug("Something has changed in the world and a future movement has become impossible. Cancelling.");
-                    cancel();
+                    cancel("future movement impossible");
                     return true;
                 }
             }
@@ -206,38 +225,46 @@ public class PathExecutor implements IPathExecutor, Helper {
         double currentCost = movement.recalculateCost(behavior.secretInternalGetCalculationContext());
         if (currentCost >= ActionCosts.COST_INF && canCancel) {
             logDebug("Something has changed in the world and this movement has become impossible. Cancelling.");
-            cancel();
+            cancel("movement impossible");
             return true;
         }
         if (!movement.calculatedWhileLoaded() && currentCost - currentMovementOriginalCostEstimate > Baritone.settings().maxCostIncrease.value && canCancel) {
             // don't do this if the movement was calculated while loaded
             // that means that this isn't a cache error, it's just part of the path interfering with a later part
             logDebug("Original cost " + currentMovementOriginalCostEstimate + " current cost " + currentCost + ". Cancelling.");
-            cancel();
+            cancel("movement cost increased");
             return true;
         }
         if (shouldPause()) {
             logDebug("Pausing since current best path is a backtrack");
+            logSprintStateIfChanged(false, "backtrack pause");
             clearKeys();
             return true;
+        }
+        if (shouldStabilizeOnIceTurn(movement)) {
+            clearKeys();
+            behavior.baritone.getLookBehavior().updateTarget(
+                    RotationUtils.calcRotationFromVec3d(ctx.playerHead(), VecUtils.getBlockPosCenter(movement.getDest()), ctx.playerRotations()),
+                    false
+            );
+            behavior.baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
+            logSprintStateIfChanged(false, "ice turn stabilize");
+            return false;
         }
         MovementStatus movementStatus = movement.update();
         if (movementStatus == UNREACHABLE || movementStatus == FAILED) {
             logDebug("Movement returns status " + movementStatus);
-            cancel();
+            cancel(movement.getClass().getSimpleName() + " status " + movementStatus.name().toLowerCase(Locale.ROOT));
             return true;
         }
         if (movementStatus == SUCCESS) {
             //System.out.println("Movement done, next path");
             pathPosition++;
             onChangeInPathPosition();
-            onTick();
+            startNextMovementThisTick();
             return true;
         } else {
-            sprintNextTick = shouldSprintNextTick();
-            if (!sprintNextTick) {
-                ctx.player().setSprinting(false); // letting go of control doesn't make you stop sprinting actually
-            }
+            updateSprintStateForCurrentMovement(movement);
             ticksOnCurrent++;
             if (ticksOnCurrent > currentMovementOriginalCostEstimate + Baritone.settings().movementTimeoutTicks.value) {
                 // only cancel if the total time has exceeded the initial estimate
@@ -245,11 +272,51 @@ public class PathExecutor implements IPathExecutor, Helper {
                 // ticksOnCurrent is greater than recalculateCost + 100
                 // this is why we cache cost at the beginning, and don't recalculate for this comparison every tick
                 logDebug("This movement has taken too long (" + ticksOnCurrent + " ticks, expected " + currentMovementOriginalCostEstimate + "). Cancelling.");
-                cancel();
+                cancel("movement timeout");
                 return true;
             }
         }
         return canCancel; // movement is in progress, but if it reports cancellable, PathingBehavior is good to cut onto the next path
+    }
+
+    private void startNextMovementThisTick() {
+        if (pathPosition >= path.movements().size()) {
+            return;
+        }
+        Movement next = (Movement) path.movements().get(pathPosition);
+        MovementStatus nextStatus = next.update();
+        if (nextStatus == UNREACHABLE || nextStatus == FAILED) {
+            logDebug("Movement returns status " + nextStatus);
+            cancel(next.getClass().getSimpleName() + " status " + nextStatus.name().toLowerCase(Locale.ROOT));
+            return;
+        }
+        if (nextStatus == RUNNING) {
+            updateSprintStateForCurrentMovement(next);
+        }
+    }
+
+    private void updateSprintStateForCurrentMovement(Movement movement) {
+        sprintNextTick = shouldSprintNextTick();
+        String sprintReason = sprintStateReason;
+        if (shouldSprintJumpNextTick()) {
+            behavior.baritone.getInputOverrideHandler().setInputForceState(Input.JUMP, true);
+        }
+        if (!sprintNextTick && shouldMaintainSprintContinuity()) {
+            sprintNextTick = true;
+            sprintReason = "flat run continuity";
+        }
+        if (!sprintNextTick && shouldMaintainCurrentSprintContinuity()) {
+            sprintNextTick = true;
+            sprintReason = "existing sprint continuity";
+        }
+        if (shouldMaintainSprintJumpMomentum()) {
+            sprintNextTick = true;
+            sprintReason = "sprint jump carryover";
+        }
+        behavior.baritone.getInputOverrideHandler().setInputForceState(Input.SPRINT, sprintNextTick);
+        ctx.player().setSprinting(sprintNextTick);
+        logSprintStateIfChanged(sprintNextTick, sprintReason);
+        logWaterDebugState(movement, sprintNextTick);
     }
 
     private Tuple<Double, BlockPos> closestPathPos(IPath path) {
@@ -279,7 +346,7 @@ public class PathExecutor implements IPathExecutor, Helper {
             // we're in some kind of sketchy situation, maybe parkouring
             return false;
         }
-        if (!MovementHelper.canWalkThrough(ctx, ctx.playerFeet()) || !MovementHelper.canWalkThrough(ctx, ctx.playerFeet().above())) {
+        if (!MovementHelper.hasPlayerClearance(ctx, ctx.playerFeet())) {
             // suffocating?
             return false;
         }
@@ -298,6 +365,12 @@ public class PathExecutor implements IPathExecutor, Helper {
         // no need to pause our very last movement when it would have otherwise cleanly exited with MovementStatus SUCCESS
         positions = positions.subList(1, positions.size());
         return positions.contains(ctx.playerFeet());
+    }
+
+    private boolean shouldDeferMidairReconciliation(Movement movement) {
+        return !ctx.player().onGround()
+                && ctx.world().getFluidState(ctx.playerFeet()).isEmpty()
+                && !movement.safeToCancel();
     }
 
     private boolean possiblyOffPath(Tuple<Double, BlockPos> status, double leniency) {
@@ -349,6 +422,7 @@ public class PathExecutor implements IPathExecutor, Helper {
 
         // first and foremost, if allowSprint is off, or if we don't have enough hunger, don't try and sprint
         if (!new CalculationContext(behavior.baritone, false).canSprint) {
+            sprintStateReason = "cannot sprint (setting or hunger)";
             return false;
         }
         IMovement current = path.movements().get(pathPosition);
@@ -361,8 +435,8 @@ public class PathExecutor implements IPathExecutor, Helper {
                     logDebug("Skipping traverse to straight ascend");
                     pathPosition++;
                     onChangeInPathPosition();
-                    onTick();
                     behavior.baritone.getInputOverrideHandler().setInputForceState(Input.JUMP, true);
+                    sprintStateReason = "skipping into sprint ascend";
                     return true;
                 } else {
                     logDebug("Too far to the side to safely sprint ascend");
@@ -372,6 +446,7 @@ public class PathExecutor implements IPathExecutor, Helper {
 
         // if the movement requested sprinting, then we're done
         if (requested) {
+            sprintStateReason = MovementHelper.isLiquid(ctx, ctx.playerFeet()) ? "movement requested sprint in water" : "movement requested sprint";
             return true;
         }
 
@@ -400,6 +475,7 @@ public class PathExecutor implements IPathExecutor, Helper {
             }
             if (((MovementDescend) current).safeMode() && !((MovementDescend) current).skipToAscend()) {
                 logDebug("Sprinting would be unsafe");
+                sprintStateReason = "unsafe descend";
                 return false;
             }
 
@@ -409,9 +485,9 @@ public class PathExecutor implements IPathExecutor, Helper {
                     // a descend then an ascend in the same direction
                     pathPosition++;
                     onChangeInPathPosition();
-                    onTick();
                     // okay to skip clearKeys and / or onChangeInPathPosition here since this isn't possible to repeat, since it's asymmetric
                     logDebug("Skipping descend to straight ascend");
+                    sprintStateReason = "skipping descend into ascend";
                     return true;
                 }
                 if (canSprintFromDescendInto(ctx, current, next)) {
@@ -426,9 +502,9 @@ public class PathExecutor implements IPathExecutor, Helper {
                     if (ctx.playerFeet().equals(current.getDest())) {
                         pathPosition++;
                         onChangeInPathPosition();
-                        onTick();
                     }
 
+                    sprintStateReason = "descend chain sprint";
                     return true;
                 }
                 //logDebug("Turning off sprinting " + movement + " " + next + " " + movement.getDirection() + " " + next.getDirection().down() + " " + next.getDirection().down().equals(movement.getDirection()));
@@ -447,6 +523,7 @@ public class PathExecutor implements IPathExecutor, Helper {
                 }
             }
             if (pathPosition < path.length() - 2 && prev instanceof MovementTraverse && sprintableAscend(ctx, (MovementTraverse) prev, (MovementAscend) current, path.movements().get(pathPosition + 1))) {
+                sprintStateReason = "sprint ascend";
                 return true;
             }
         }
@@ -462,12 +539,259 @@ public class PathExecutor implements IPathExecutor, Helper {
                 if (ctx.playerFeet().equals(fallDest)) {
                     pathPosition = path.positions().indexOf(fallDest);
                     onChangeInPathPosition();
-                    onTick();
                     return true;
                 }
                 clearKeys();
                 behavior.baritone.getLookBehavior().updateTarget(RotationUtils.calcRotationFromVec3d(ctx.playerHead(), data.getA(), ctx.playerRotations()), false);
                 behavior.baritone.getInputOverrideHandler().setInputForceState(Input.MOVE_FORWARD, true);
+                sprintStateReason = "fall override";
+                return true;
+            }
+        }
+        sprintStateReason = "movement did not request sprint";
+        return false;
+    }
+
+    private boolean shouldSprintJumpNextTick() {
+        if (!sprintNextTick || !Baritone.settings().allowSprintJump.value || !ctx.player().onGround() || MovementHelper.isConsumingItem(ctx)) {
+            return false;
+        }
+        if (behavior.baritone.getInputOverrideHandler().isInputForcedDown(Input.JUMP)) {
+            return false;
+        }
+        if (sprintJumpTriggeredMovement == pathPosition) {
+            return false;
+        }
+        if (sprintJumpRunLength(pathPosition) < MIN_SPRINT_JUMP_RUN_LENGTH) {
+            return false;
+        }
+        if (!readyForSprintJumpTakeoff(path.movements().get(pathPosition))) {
+            return false;
+        }
+        sprintJumpTriggeredMovement = pathPosition;
+        sprintJumpCarryover = true;
+        return true;
+    }
+
+    private boolean shouldMaintainSprintJumpMomentum() {
+        if (!sprintJumpCarryover) {
+            return false;
+        }
+        if (ctx.player().onGround()) {
+            sprintJumpCarryover = false;
+            return false;
+        }
+        return true;
+    }
+
+    private boolean shouldMaintainSprintContinuity() {
+        if (!ctx.player().onGround()) {
+            return false;
+        }
+        if (!new CalculationContext(behavior.baritone, false).canSprint) {
+            return false;
+        }
+        if (pathPosition <= 0 || pathPosition >= path.movements().size()) {
+            return false;
+        }
+        IMovement current = path.movements().get(pathPosition);
+        IMovement previous = path.movements().get(pathPosition - 1);
+        if (!isSprintJumpEligible(current, null) || !isSprintJumpEligible(previous, null)) {
+            return false;
+        }
+        return previous.getDirection().equals(current.getDirection());
+    }
+
+    private boolean shouldMaintainCurrentSprintContinuity() {
+        if (ctx.player() == null || !ctx.player().isSprinting() || !ctx.player().onGround()) {
+            return false;
+        }
+        if (!new CalculationContext(behavior.baritone, false).canSprint) {
+            return false;
+        }
+        if (pathPosition < 0 || pathPosition >= path.movements().size()) {
+            return false;
+        }
+        return isSprintJumpEligible(path.movements().get(pathPosition), null);
+    }
+
+    private boolean shouldStabilizeOnIceTurn(Movement current) {
+        if (pathPosition <= 0 || !ctx.player().onGround() || !ctx.playerFeet().equals(current.getSrc())) {
+            return false;
+        }
+        if (!isIceSurface(current.getSrc().below())) {
+            return false;
+        }
+        IMovement previous = path.movements().get(pathPosition - 1);
+        if (!previous.getDest().equals(current.getSrc())) {
+            return false;
+        }
+        BlockPos previousFlat = flatDirection(previous.getDirection());
+        BlockPos currentFlat = flatDirection(current.getDirection());
+        if (previousFlat.equals(BlockPos.ZERO) || currentFlat.equals(BlockPos.ZERO)) {
+            return false;
+        }
+        int dot = previousFlat.getX() * currentFlat.getX() + previousFlat.getZ() * currentFlat.getZ();
+        if (dot != 0) {
+            return false;
+        }
+        Vec3 motion = ctx.player().getDeltaMovement();
+        double horizontalSpeed = Math.sqrt(motion.x * motion.x + motion.z * motion.z);
+        return horizontalSpeed > 0.08D;
+    }
+
+    private BlockPos flatDirection(BlockPos direction) {
+        return new BlockPos(Integer.signum(direction.getX()), 0, Integer.signum(direction.getZ()));
+    }
+
+    private boolean isIceSurface(BlockPos pos) {
+        Block block = ctx.world().getBlockState(pos).getBlock();
+        return block == Blocks.ICE || block == Blocks.PACKED_ICE || block == Blocks.BLUE_ICE || block == Blocks.FROSTED_ICE;
+    }
+
+    private boolean effectiveSprintState() {
+        return sprintNextTick || (sprintJumpCarryover && !ctx.player().onGround());
+    }
+
+    private void logSprintStateIfChanged(boolean sprinting, String reason) {
+        Boolean previous = lastLoggedSprintState;
+        if (previous != null && previous == sprinting) {
+            return;
+        }
+        lastLoggedSprintState = sprinting;
+        if (CHAT_SPRINT_DEBUG) {
+            logDirect("Sprint debug: " + (sprinting ? "on" : "off") + " (" + reason + ")", false);
+        }
+    }
+
+    private void logWaterDebugState(Movement movement, boolean sprinting) {
+        boolean sprintSwimming = isActualSprintSwimming(movement, sprinting);
+        if (sprintSwimming && !lastWaterSprintSwimState) {
+            logWaterDebug("sprint swim start");
+        }
+        lastWaterSprintSwimState = sprintSwimming;
+
+        boolean submergeRequested = isSubmergeRequested(movement);
+        if (submergeRequested && !lastWaterSubmergeState) {
+            logWaterDebug("submerge requested");
+        }
+        lastWaterSubmergeState = submergeRequested;
+    }
+
+    private boolean isActualSprintSwimming(Movement movement, boolean sprinting) {
+        return sprinting
+                && ctx.player() != null
+                && ctx.player().isInWater()
+                && movement != null
+                && MovementHelper.shouldSwimUnderwater(ctx, movement.getDest())
+                && ctx.player().isSwimming();
+    }
+
+    private boolean isSubmergeRequested(Movement movement) {
+        return ctx.player() != null
+                && ctx.player().isInWater()
+                && movement != null
+                && MovementHelper.shouldSwimUnderwater(ctx, movement.getDest())
+                && !ctx.player().isSwimming()
+                && MovementHelper.isWaterSubmergeLatched(ctx);
+    }
+
+    private boolean isHeadSubmerged() {
+        return MovementHelper.isHeadUnderWaterSurface(ctx);
+    }
+
+    private void logWaterDebug(String phase) {
+        Double headDepth = headOffsetFromWaterSurface();
+        if (headDepth == null) {
+            return;
+        }
+        String messagePrefix = "Water debug: " + phase;
+        if ("sprint swim start".equals(phase)) {
+            messagePrefix += ", sprint on";
+        }
+        if (Math.abs(headDepth) < 0.001D) {
+            logDirect(messagePrefix + ", head at water surface", false);
+            return;
+        }
+        String relation = headDepth > 0 ? "under" : "above";
+        logDirect(String.format(
+                Locale.ROOT,
+                "%s, head %.2f blocks %s water surface",
+                messagePrefix,
+                Math.abs(headDepth),
+                relation
+        ), false);
+    }
+
+    private Double headOffsetFromWaterSurface() {
+        Double headOffset = MovementHelper.headOffsetFromWaterSurface(ctx);
+        if (headOffset == null) {
+            return null;
+        }
+        return Math.round(headOffset * 20.0D) / 20.0D;
+    }
+
+    private int sprintJumpRunLength(int startIndex) {
+        if (startIndex < 0 || startIndex >= path.movements().size()) {
+            return 0;
+        }
+        IMovement first = path.movements().get(startIndex);
+        if (!isSprintJumpEligible(first, null)) {
+            return 0;
+        }
+        Vec3i direction = first.getDirection();
+        int count = 0;
+        for (int i = startIndex; i < path.movements().size(); i++) {
+            if (!isSprintJumpEligible(path.movements().get(i), direction)) {
+                break;
+            }
+            count++;
+        }
+        return count;
+    }
+
+    private boolean readyForSprintJumpTakeoff(IMovement movement) {
+        double startX = movement.getSrc().getX() + 0.5D;
+        double startZ = movement.getSrc().getZ() + 0.5D;
+        double distFromStart = Math.max(
+                Math.abs(startX - ctx.player().position().x),
+                Math.abs(startZ - ctx.player().position().z)
+        );
+        return distFromStart >= SPRINT_JUMP_TAKEOFF_DISTANCE;
+    }
+
+    private boolean isSprintJumpEligible(IMovement movement, Vec3i direction) {
+        if (!(movement instanceof MovementTraverse || movement instanceof MovementDiagonal)) {
+            return false;
+        }
+        if (movement.getSrc().y != movement.getDest().y) {
+            return false;
+        }
+        if (direction != null && !direction.equals(movement.getDirection())) {
+            return false;
+        }
+        Movement cast = (Movement) movement;
+        BlockStateInterface bsi = new BlockStateInterface(ctx);
+        if (!cast.toBreak(bsi).isEmpty() || !cast.toPlace(bsi).isEmpty() || !cast.toWalkInto(bsi).isEmpty()) {
+            return false;
+        }
+        if (MovementHelper.isLiquid(ctx, movement.getSrc()) || MovementHelper.isLiquid(ctx, movement.getDest())) {
+            return false;
+        }
+        if (!MovementHelper.canWalkOn(ctx, movement.getDest().below())) {
+            return false;
+        }
+        return !hasSprintJumpSensitiveBlocks(movement.getSrc()) && !hasSprintJumpSensitiveBlocks(movement.getDest());
+    }
+
+    private boolean hasSprintJumpSensitiveBlocks(BlockPos feetPos) {
+        Block support = BlockStateInterface.getBlock(ctx, feetPos.below());
+        if (support == Blocks.LADDER || support == Blocks.VINE || support == Blocks.SOUL_SAND || support == Blocks.MAGMA_BLOCK) {
+            return true;
+        }
+        for (int offset = -1; offset <= MovementHelper.pathingPlayerHeight(); offset++) {
+            Block block = BlockStateInterface.getBlock(ctx, feetPos.above(offset));
+            if (block instanceof DoorBlock || block instanceof FenceGateBlock || block == Blocks.LADDER || block == Blocks.VINE) {
                 return true;
             }
         }
@@ -519,7 +843,7 @@ public class PathExecutor implements IPathExecutor, Helper {
             return false;
         }
         // we are centered
-        BlockPos headBonk = current.getSrc().subtract(current.getDirection()).above(2);
+        BlockPos headBonk = current.getSrc().subtract(current.getDirection()).above(MovementHelper.pathingPlayerHeight());
         if (MovementHelper.fullyPassable(ctx, headBonk)) {
             return true;
         }
@@ -547,8 +871,9 @@ public class PathExecutor implements IPathExecutor, Helper {
         if (!next.toBreakCached.isEmpty()) {
             return false; // it's breaking
         }
+        int playerHeight = MovementHelper.pathingPlayerHeight();
         for (int x = 0; x < 2; x++) {
-            for (int y = 0; y < 3; y++) {
+            for (int y = 0; y <= playerHeight; y++) {
                 BlockPos chk = current.getSrc().above(y);
                 if (x == 1) {
                     chk = chk.offset(current.getDirection());
@@ -558,10 +883,10 @@ public class PathExecutor implements IPathExecutor, Helper {
                 }
             }
         }
-        if (MovementHelper.avoidWalkingInto(ctx.world().getBlockState(current.getSrc().above(3)))) {
+        if (MovementHelper.avoidWalkingInto(ctx.world().getBlockState(current.getSrc().above(playerHeight + 1)))) {
             return false;
         }
-        return !MovementHelper.avoidWalkingInto(ctx.world().getBlockState(next.getDest().above(2))); // codacy smh my head
+        return !MovementHelper.avoidWalkingInto(ctx.world().getBlockState(next.getDest().above(playerHeight))); // codacy smh my head
     }
 
     private static boolean canSprintFromDescendInto(IPlayerContext ctx, IMovement current, IMovement next) {
@@ -580,6 +905,7 @@ public class PathExecutor implements IPathExecutor, Helper {
     private void onChangeInPathPosition() {
         clearKeys();
         ticksOnCurrent = 0;
+        sprintJumpTriggeredMovement = -1;
     }
 
     private void clearKeys() {
@@ -587,7 +913,9 @@ public class PathExecutor implements IPathExecutor, Helper {
         behavior.baritone.getInputOverrideHandler().clearAllKeys();
     }
 
-    private void cancel() {
+    private void cancel(String reason) {
+        sprintJumpCarryover = false;
+        logSprintStateIfChanged(false, reason);
         clearKeys();
         behavior.baritone.getInputOverrideHandler().getBlockBreakHelper().stopBreakingBlock();
         pathPosition = path.length() + 3;
@@ -614,6 +942,7 @@ public class PathExecutor implements IPathExecutor, Helper {
             ret.currentMovementOriginalCostEstimate = currentMovementOriginalCostEstimate;
             ret.costEstimateIndex = costEstimateIndex;
             ret.ticksOnCurrent = ticksOnCurrent;
+            ret.copySprintStateFrom(this);
             return ret;
         }).orElseGet(this::cutIfTooLong); // dont actually call cutIfTooLong every tick if we won't actually use it, use a method reference
     }
@@ -635,9 +964,20 @@ public class PathExecutor implements IPathExecutor, Helper {
                 ret.costEstimateIndex = costEstimateIndex - cutoffAmt;
             }
             ret.ticksOnCurrent = ticksOnCurrent;
+            ret.copySprintStateFrom(this);
             return ret;
         }
         return this;
+    }
+
+    private void copySprintStateFrom(PathExecutor previous) {
+        this.sprintNextTick = previous.sprintNextTick;
+        this.sprintJumpTriggeredMovement = previous.sprintJumpTriggeredMovement;
+        this.sprintJumpCarryover = previous.sprintJumpCarryover;
+        this.lastLoggedSprintState = previous.lastLoggedSprintState;
+        this.sprintStateReason = previous.sprintStateReason;
+        this.lastWaterSprintSwimState = previous.lastWaterSprintSwimState;
+        this.lastWaterSubmergeState = previous.lastWaterSubmergeState;
     }
 
     @Override
@@ -666,6 +1006,6 @@ public class PathExecutor implements IPathExecutor, Helper {
     }
 
     public boolean isSprinting() {
-        return sprintNextTick;
+        return effectiveSprintState();
     }
 }

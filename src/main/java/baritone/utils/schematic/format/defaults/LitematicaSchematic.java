@@ -87,9 +87,7 @@ public final class LitematicaSchematic extends CompositeSchematic implements ISt
             ResourceLocation blockKey = ResourceLocation.tryParse(tag.getString("Name"));
             Block block = blockKey == null
                 ? Blocks.AIR
-                : BuiltInRegistries.BLOCK.get(blockKey)
-                    .map(Holder.Reference::value)
-                    .orElse(Blocks.AIR);
+                : BuiltInRegistries.BLOCK.getOptional(blockKey).orElse(Blocks.AIR);
             CompoundTag properties = tag.getCompound("Properties");
 
             blockList[i] = getBlockState(block, properties);

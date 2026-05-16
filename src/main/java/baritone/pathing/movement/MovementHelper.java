@@ -31,16 +31,14 @@ import baritone.utils.BlockStateInterface;
 import baritone.utils.ToolSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.Holder;
 import net.minecraft.util.Mth;
-import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.item.enchantment.Enchantment;
-import net.minecraft.world.item.enchantment.Enchantments;
-import net.minecraft.world.item.enchantment.ItemEnchantments;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.piston.MovingPistonBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.block.state.properties.Half;
 import net.minecraft.world.level.block.state.properties.SlabType;
 import net.minecraft.world.level.block.state.properties.StairsShape;
@@ -53,6 +51,7 @@ import net.minecraft.world.level.pathfinder.PathComputationType;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.item.UseAnim;
 
 import java.util.*;
 
@@ -66,6 +65,92 @@ import static baritone.pathing.precompute.Ternary.*;
  * @author leijurv
  */
 public interface MovementHelper extends ActionCosts, Helper {
+
+    Map<Player, Boolean> WATER_SUBMERGE_LATCH = Collections.synchronizedMap(new WeakHashMap<>());
+    Map<Player, Boolean> WATER_SURFACE_TRAVEL_LATCH = Collections.synchronizedMap(new WeakHashMap<>());
+    Map<Player, Boolean> WATER_AIR_RECOVERY_LATCH = Collections.synchronizedMap(new WeakHashMap<>());
+
+    static int pathingPlayerHeight() {
+        return Math.max(1, Baritone.settings().playerHeight.value);
+    }
+
+    static boolean hasVerticalClearance(BlockStateInterface bsi, int x, int y, int z, int height) {
+        for (int offset = 0; offset < height; offset++) {
+            if (!canWalkThrough(bsi, x, y + offset, z)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static boolean hasVerticalClearance(CalculationContext context, int x, int y, int z, int height) {
+        for (int offset = 0; offset < height; offset++) {
+            if (!canWalkThrough(context, x, y + offset, z)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static boolean hasVerticalClearance(IPlayerContext ctx, BlockPos pos, int height) {
+        for (int offset = 0; offset < height; offset++) {
+            if (!canWalkThrough(ctx, new BetterBlockPos(pos.above(offset)))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static boolean hasPlayerClearance(CalculationContext context, int x, int y, int z) {
+        return hasVerticalClearance(context, x, y, z, context.playerHeight);
+    }
+
+    static boolean hasPlayerClearance(IPlayerContext ctx, BlockPos pos) {
+        return hasVerticalClearance(ctx, pos, pathingPlayerHeight());
+    }
+
+    static boolean hasFullyPassableClearance(CalculationContext context, int x, int y, int z, int height) {
+        for (int offset = 0; offset < height; offset++) {
+            if (!fullyPassable(context, x, y + offset, z)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static double getMiningDurationTicksForColumn(CalculationContext context, int x, int y, int z, int height) {
+        double totalCost = 0;
+        for (int offset = 0; offset < height; offset++) {
+            double blockCost = getMiningDurationTicks(context, x, y + offset, z, offset == height - 1);
+            if (blockCost >= COST_INF) {
+                return COST_INF;
+            }
+            totalCost += blockCost;
+        }
+        return totalCost;
+    }
+
+    static boolean avoidWalkingInto(BlockStateInterface bsi, int x, int y, int z, int height, boolean allowWaterAtFeet) {
+        for (int offset = 0; offset < height; offset++) {
+            BlockState state = bsi.get0(x, y + offset, z);
+            if (avoidWalkingInto(state) && !(allowWaterAtFeet && offset == 0 && isWater(state))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static boolean avoidWalkingInto(IPlayerContext ctx, BlockPos pos, int height, boolean allowWaterAtFeet) {
+        return avoidWalkingInto(new BlockStateInterface(ctx), pos.getX(), pos.getY(), pos.getZ(), height, allowWaterAtFeet);
+    }
+
+    static boolean isConsumingItem(IPlayerContext ctx) {
+        if (ctx.player() == null || !ctx.player().isUsingItem()) {
+            return false;
+        }
+        UseAnim animation = ctx.player().getUseItem().getUseAnimation();
+        return animation == UseAnim.EAT || animation == UseAnim.DRINK;
+    }
 
     static boolean avoidBreaking(BlockStateInterface bsi, int x, int y, int z, BlockState state) {
         if (!bsi.worldBorder.canPlaceAt(x, z)) {
@@ -182,10 +267,15 @@ public interface MovementHelper extends ActionCosts, Helper {
         if (block instanceof CauldronBlock) {
             return NO;
         }
-        if (state.isPathfindable(PathComputationType.LAND)) {
-            return YES;
-        } else {
-            return NO;
+        try { // A dodgy catch-all at the end, for most blocks with default behaviour this will work, however where blocks are special this will error out, and we can handle it when we have this information
+            if (state.isPathfindable(null, null, PathComputationType.LAND)) {
+                return YES;
+            } else {
+                return NO;
+            }
+        } catch (Throwable exception) {
+            System.out.println("The block " + state.getBlock().getName().getString() + " requires a special case due to the exception " + exception.getMessage());
+            return MAYBE;
         }
     }
 
@@ -216,11 +306,10 @@ public interface MovementHelper extends ActionCosts, Helper {
             if (isFlowing(x, y, z, state, bsi)) {
                 return false;
             }
-            // Everything after this point has to be a special case as it relies on the water not being flowing, which means a special case is needed.
+            // Everything after this point has to be a special case as it relies on the water not being flowing.
             if (Baritone.settings().assumeWalkOnWater.value) {
                 return false;
             }
-
             BlockState up = bsi.get0(x, y + 1, z);
             if (!up.getFluidState().isEmpty() || up.getBlock() instanceof WaterlilyBlock) {
                 return false;
@@ -228,7 +317,10 @@ public interface MovementHelper extends ActionCosts, Helper {
             return fluidState.getType() instanceof WaterFluid;
         }
 
-        return state.isPathfindable(PathComputationType.LAND);
+        // every block that overrides isPassable with anything more complicated than a "return true;" or "return false;"
+        // has already been accounted for above
+        // therefore it's safe to not construct a blockpos from our x, y, z ints and instead just pass null
+        return state.isPathfindable(bsi.access, BlockPos.ZERO, PathComputationType.LAND); // workaround for future compatibility =P
     }
 
     static Ternary fullyPassableBlockState(BlockState state) {
@@ -256,10 +348,16 @@ public interface MovementHelper extends ActionCosts, Helper {
         }
         // door, fence gate, liquid, trapdoor have been accounted for, nothing else uses the world or pos parameters
         // at least in 1.12.2 vanilla, that is.....
-        if (state.isPathfindable(PathComputationType.LAND)) {
-            return YES;
-        } else {
-            return NO;
+        try { // A dodgy catch-all at the end, for most blocks with default behaviour this will work, however where blocks are special this will error out, and we can handle it when we have this information
+            if (state.isPathfindable(null, null, PathComputationType.LAND)) {
+                return YES;
+            } else {
+                return NO;
+            }
+        } catch (Throwable exception) {
+            // see PR #1087 for why
+            System.out.println("The block " + state.getBlock().getName().getString() + " requires a special case due to the exception " + exception.getMessage());
+            return MAYBE;
         }
     }
 
@@ -284,14 +382,11 @@ public interface MovementHelper extends ActionCosts, Helper {
         if (fullyPassable == NO) {
             return false;
         }
-        return state.isPathfindable(PathComputationType.LAND);
+        return fullyPassablePosition(new BlockStateInterface(ctx), pos.getX(), pos.getY(), pos.getZ(), state); // meh
     }
 
-    /**
-     * params retained for backwards compatibility
-     */
     static boolean fullyPassablePosition(BlockStateInterface bsi, int x, int y, int z, BlockState state) {
-        return state.isPathfindable(PathComputationType.LAND);
+        return state.isPathfindable(bsi.access, bsi.isPassableBlockPos.set(x, y, z), PathComputationType.LAND);
     }
 
     static boolean isReplaceable(int x, int y, int z, BlockState state, BlockStateInterface bsi) {
@@ -329,11 +424,16 @@ public interface MovementHelper extends ActionCosts, Helper {
     }
 
     static boolean isDoorPassable(IPlayerContext ctx, BlockPos doorPos, BlockPos playerPos) {
+        BlockState state = BlockStateInterface.get(ctx, doorPos);
+        if (state.getBlock() instanceof DoorBlock && state.getValue(DoorBlock.HALF) == DoubleBlockHalf.UPPER) {
+            doorPos = doorPos.below();
+            state = BlockStateInterface.get(ctx, doorPos);
+        }
+
         if (playerPos.equals(doorPos)) {
             return false;
         }
 
-        BlockState state = BlockStateInterface.get(ctx, doorPos);
         if (!(state.getBlock() instanceof DoorBlock)) {
             return true;
         }
@@ -464,11 +564,11 @@ public interface MovementHelper extends ActionCosts, Helper {
             }
             if (MovementHelper.isFlowing(x, y, z, state, bsi) || upState.getFluidState().getType() == Fluids.FLOWING_WATER) {
                 // the only scenario in which we can walk on flowing water is if it's under still water with jesus off
-                return isWater(upState) && !Baritone.settings().assumeWalkOnWater.value;
+                return hasSwimmableWaterColumn(bsi, x, y, z) && !Baritone.settings().assumeWalkOnWater.value;
             }
             // if assumeWalkOnWater is on, we can only walk on water if there isn't water above it
-            // if assumeWalkOnWater is off, we can only walk on water if there is water above it
-            return isWater(upState) ^ Baritone.settings().assumeWalkOnWater.value;
+            // if assumeWalkOnWater is off, water is usable when the player can be in the water above it
+            return Baritone.settings().assumeWalkOnWater.value ? !isWater(upState) : hasSwimmableWaterColumn(bsi, x, y, z);
         }
 
         if (MovementHelper.isLava(state) && !MovementHelper.isFlowing(x, y, z, state, bsi) && Baritone.settings().assumeWalkOnLava.value) { // if we get here it means that assumeWalkOnLava must be true, so put it last
@@ -476,6 +576,10 @@ public interface MovementHelper extends ActionCosts, Helper {
         }
 
         return false; // If we don't recognise it then we want to just return false to be safe.
+    }
+
+    static boolean hasSwimmableWaterColumn(BlockStateInterface bsi, int x, int y, int z) {
+        return isWater(bsi.get0(x, y + 1, z));
     }
 
     static boolean canWalkOn(CalculationContext context, int x, int y, int z, BlockState state) {
@@ -505,27 +609,14 @@ public interface MovementHelper extends ActionCosts, Helper {
     static boolean canUseFrostWalker(CalculationContext context, BlockState state) {
         return context.frostWalker != 0
                 && state == FrostedIceBlock.meltsInto()
-                && state.getValue(LiquidBlock.LEVEL) == 0;
+                && ((Integer) state.getValue(LiquidBlock.LEVEL)) == 0;
     }
 
     static boolean canUseFrostWalker(IPlayerContext ctx, BlockPos pos) {
-        boolean hasFrostWalker = false;
-        OUTER: for (EquipmentSlot slot : EquipmentSlot.values()) {
-            ItemEnchantments itemEnchantments = ctx
-                .player()
-                .getItemBySlot(slot)
-                .getEnchantments();
-            for (Holder<Enchantment> enchant : itemEnchantments.keySet()) {
-                if (enchant.is(Enchantments.FROST_WALKER)) {
-                    hasFrostWalker = true;
-                    break OUTER;
-                }
-            }
-        }
         BlockState state = BlockStateInterface.get(ctx, pos);
-        return hasFrostWalker
+        return EnchantmentHelper.hasFrostWalker(ctx.player())
                 && state == FrostedIceBlock.meltsInto()
-                && state.getValue(LiquidBlock.LEVEL) == 0;
+                && ((Integer) state.getValue(LiquidBlock.LEVEL)) == 0;
     }
 
     /**
@@ -639,7 +730,9 @@ public interface MovementHelper extends ActionCosts, Helper {
      * @param b   the blockstate to mine
      */
     static void switchToBestToolFor(IPlayerContext ctx, BlockState b) {
-        switchToBestToolFor(ctx, b, new ToolSet(ctx.player()), BaritoneAPI.getSettings().preferSilkTouch.value);
+        boolean silkTouch = BaritoneAPI.getSettings().preferSilkTouch.value
+                || Baritone.settings().silkTouchBlocks.value.contains(b.getBlock());
+        switchToBestToolFor(ctx, b, new ToolSet(ctx.player()), silkTouch);
     }
 
     /**
@@ -650,6 +743,10 @@ public interface MovementHelper extends ActionCosts, Helper {
      * @param ts  previously calculated ToolSet
      */
     static void switchToBestToolFor(IPlayerContext ctx, BlockState b, ToolSet ts, boolean preferSilkTouch) {
+        IBaritone baritone = BaritoneAPI.getProvider().getBaritoneForPlayer(ctx.player());
+        if (baritone instanceof Baritone && ((Baritone) baritone).getInventoryBehavior().isAutoEating()) {
+            return;
+        }
         if (Baritone.settings().autoTool.value && !Baritone.settings().assumeExternalAutoTool.value) {
             ctx.player().getInventory().selected = ts.getBestSlot(b.getBlock(), preferSilkTouch);
         }
@@ -662,6 +759,340 @@ public interface MovementHelper extends ActionCosts, Helper {
                         ctx.playerRotations()).withPitch(ctx.playerRotations().getPitch()),
                 false
         )).setInput(Input.MOVE_FORWARD, true);
+    }
+
+    static boolean moveBackIfOvershot(IPlayerContext ctx, MovementState state, BlockPos src, BlockPos dest, double minDistance) {
+        Vec3 destCenter = VecUtils.getBlockPosCenter(dest);
+        Vec3 playerPos = ctx.player().position();
+        double offsetX = playerPos.x - destCenter.x;
+        double offsetZ = playerPos.z - destCenter.z;
+        if (offsetX * offsetX + offsetZ * offsetZ < minDistance * minDistance) {
+            return false;
+        }
+
+        int stepX = Integer.compare(dest.getX(), src.getX());
+        int stepZ = Integer.compare(dest.getZ(), src.getZ());
+        if (stepX == 0 && stepZ == 0) {
+            return false;
+        }
+        if (offsetX * stepX + offsetZ * stepZ <= 0.0D) {
+            return false;
+        }
+
+        Vec3 lookForward = new Vec3(destCenter.x + stepX, destCenter.y, destCenter.z + stepZ);
+        Rotation rotation = RotationUtils.calcRotationFromVec3d(ctx.playerHead(), lookForward, ctx.playerRotations())
+                .withPitch(ctx.playerRotations().getPitch());
+        state.setTarget(new MovementTarget(rotation, false));
+        state.setInput(Input.MOVE_FORWARD, false);
+        state.setInput(Input.MOVE_BACK, true);
+        state.setInput(Input.SPRINT, false);
+        return true;
+    }
+
+    static boolean shouldSwimUnderwater(IPlayerContext ctx, BlockPos dest) {
+        if (Baritone.settings().assumeWalkOnWater.value || ctx.player() == null || !ctx.player().isInWater()) {
+            return false;
+        }
+        BetterBlockPos feet = ctx.playerFeet();
+        BlockPos currentHead = feet.above(pathingPlayerHeight() - 1);
+        BlockPos destHead = dest.above(pathingPlayerHeight() - 1);
+        return isWater(ctx, feet)
+                && isWater(ctx, dest)
+                && (isWater(ctx, currentHead)
+                || isWater(ctx, destHead)
+                || hasSwimmableDepthBelow(ctx, feet)
+                || hasSwimmableDepthBelow(ctx, dest));
+    }
+
+    static boolean hasSwimmableDepthBelow(IPlayerContext ctx, BlockPos feetPos) {
+        for (int offset = 1; offset <= pathingPlayerHeight() + 1; offset++) {
+            if (!isWater(ctx, feetPos.below(offset))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static boolean hasSwimmableDepthBelow(CalculationContext context, int x, int y, int z) {
+        for (int offset = 1; offset <= context.playerHeight + 1; offset++) {
+            if (!isWater(context.get(x, y - offset, z))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static boolean prefersLevelSwimming(CalculationContext context, int x, int y, int z, int destX, int destZ) {
+        if (context.assumeWalkOnWater) {
+            return false;
+        }
+        if (!isWater(context.get(x, y, z)) || !isWater(context.get(destX, y, destZ))) {
+            return false;
+        }
+        if (isBelowPreferredSwimY(context, x, y, z) || isBelowPreferredSwimY(context, destX, y, destZ)) {
+            return false;
+        }
+        return hasSwimmableDepthBelow(context, x, y, z)
+                && hasSwimmableDepthBelow(context, destX, y, destZ)
+                && hasPlayerClearance(context, destX, y, destZ);
+    }
+
+    static boolean isSwimmableMovementColumn(CalculationContext context, int x, int y, int z) {
+        if (!isWater(context.get(x, y, z))) {
+            return false;
+        }
+        for (int offset = 1; offset < context.playerHeight; offset++) {
+            BlockState state = context.get(x, y + offset, z);
+            if (!canWalkThrough(context, x, y + offset, z, state)) {
+                return false;
+            }
+            if (avoidWalkingInto(state) && !isWater(state)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static int preferredSwimFeetY(CalculationContext context, int x, int y, int z) {
+        int topOccupiedY = y + context.playerHeight - 1;
+        if (!isWater(context.get(x, topOccupiedY, z))) {
+            return Integer.MIN_VALUE;
+        }
+        int topWaterY = topOccupiedY;
+        while (topWaterY + 1 < context.world.getMaxBuildHeight() && isWater(context.get(x, topWaterY + 1, z))) {
+            topWaterY++;
+        }
+        return topWaterY - (context.playerHeight - 1);
+    }
+
+    static boolean isBelowPreferredSwimY(CalculationContext context, int x, int y, int z) {
+        return y < preferredSwimFeetY(context, x, y, z);
+    }
+
+    static double underwaterDepthPenalty(CalculationContext context, int x, int y, int z) {
+        if (context.assumeWalkOnWater) {
+            return 0;
+        }
+        int extraDepth = preferredSwimFeetY(context, x, y, z) - y;
+        if (extraDepth <= 0) {
+            return 0;
+        }
+        return extraDepth * WALK_ONE_BLOCK_COST;
+    }
+
+    static boolean canSurfaceSwim(IPlayerContext ctx, BlockPos feetPos) {
+        int scanY = feetPos.getY() + pathingPlayerHeight() - 1;
+        if (!isWater(ctx, new BlockPos(feetPos.getX(), scanY, feetPos.getZ()))) {
+            return true;
+        }
+        while (scanY + 1 < ctx.world().getMaxBuildHeight()
+                && isWater(ctx, new BlockPos(feetPos.getX(), scanY + 1, feetPos.getZ()))) {
+            scanY++;
+        }
+        if (scanY + 1 >= ctx.world().getMaxBuildHeight()) {
+            return false;
+        }
+        return canWalkThrough(ctx, new BetterBlockPos(feetPos.getX(), scanY + 1, feetPos.getZ()));
+    }
+
+    static Double headOffsetFromWaterSurface(IPlayerContext ctx) {
+        if (ctx.player() == null || ctx.world() == null) {
+            return null;
+        }
+        BlockPos feet = ctx.playerFeet();
+        int x = feet.getX();
+        int z = feet.getZ();
+        int minY = ctx.world().getMinBuildHeight();
+        int maxY = ctx.world().getMaxBuildHeight();
+        double trackedY = ctx.player().isSwimming()
+                ? ctx.player().position().y
+                : ctx.player().position().y + pathingPlayerHeight();
+        int scanY = Math.max(minY, Math.min(maxY - 1, Mth.floor(trackedY)));
+        while (scanY >= minY && !isWater(ctx, new BlockPos(x, scanY, z))) {
+            scanY--;
+        }
+        if (scanY < minY) {
+            return null;
+        }
+        int topWaterY = scanY;
+        while (topWaterY + 1 < maxY && isWater(ctx, new BlockPos(x, topWaterY + 1, z))) {
+            topWaterY++;
+        }
+        BlockPos topWater = new BlockPos(x, topWaterY, z);
+        double surfaceY = topWaterY + ctx.world().getFluidState(topWater).getHeight(ctx.world(), topWater);
+        return surfaceY - trackedY;
+    }
+
+    static boolean isHeadUnderWaterSurface(IPlayerContext ctx) {
+        Double headOffset = headOffsetFromWaterSurface(ctx);
+        return headOffset != null && headOffset > 0.0D;
+    }
+
+    static boolean isWaterSubmergeLatched(IPlayerContext ctx) {
+        return ctx.player() != null && WATER_SUBMERGE_LATCH.containsKey(ctx.player());
+    }
+
+    static void setWaterSubmergeLatched(IPlayerContext ctx, boolean latched) {
+        if (ctx.player() == null) {
+            return;
+        }
+        if (latched) {
+            WATER_SUBMERGE_LATCH.put(ctx.player(), Boolean.TRUE);
+        } else {
+            WATER_SUBMERGE_LATCH.remove(ctx.player());
+        }
+    }
+
+    static boolean isWaterSurfaceTravelLatched(IPlayerContext ctx) {
+        return ctx.player() != null && WATER_SURFACE_TRAVEL_LATCH.containsKey(ctx.player());
+    }
+
+    static void setWaterSurfaceTravelLatched(IPlayerContext ctx, boolean latched) {
+        if (ctx.player() == null) {
+            return;
+        }
+        if (latched) {
+            WATER_SURFACE_TRAVEL_LATCH.put(ctx.player(), Boolean.TRUE);
+        } else {
+            WATER_SURFACE_TRAVEL_LATCH.remove(ctx.player());
+        }
+    }
+
+    static boolean isWaterAirRecoveryLatched(IPlayerContext ctx) {
+        return ctx.player() != null && WATER_AIR_RECOVERY_LATCH.containsKey(ctx.player());
+    }
+
+    static void setWaterAirRecoveryLatched(IPlayerContext ctx, boolean latched) {
+        if (ctx.player() == null) {
+            return;
+        }
+        if (latched) {
+            WATER_AIR_RECOVERY_LATCH.put(ctx.player(), Boolean.TRUE);
+        } else {
+            WATER_AIR_RECOVERY_LATCH.remove(ctx.player());
+        }
+    }
+
+    static boolean shouldRecoverWaterAir(IPlayerContext ctx) {
+        if (ctx.player() == null || !ctx.player().isInWater()) {
+            return false;
+        }
+        int maxAir = ctx.player().getMaxAirSupply();
+        if (maxAir <= 0) {
+            return false;
+        }
+        int currentAir = ctx.player().getAirSupply();
+        if (isWaterAirRecoveryLatched(ctx)) {
+            return currentAir < maxAir;
+        }
+        int twoBubbleThreshold = Math.max(1, (maxAir * 2) / 10);
+        return currentAir <= twoBubbleThreshold;
+    }
+
+    static boolean isUnderwaterDescendEdgeStuck(IPlayerContext ctx) {
+        if (ctx.player() == null) {
+            return false;
+        }
+        Vec3 delta = ctx.player().getDeltaMovement();
+        if (delta.x * delta.x + delta.z * delta.z > 0.0025D) {
+            return false;
+        }
+        BlockPos feet = ctx.playerFeet();
+        BlockPos[] supportChecks = new BlockPos[] {
+                feet.below(),
+                feet.north().below(),
+                feet.south().below(),
+                feet.east().below(),
+                feet.west().below()
+        };
+        for (BlockPos supportPos : supportChecks) {
+            if (canWalkOn(ctx, supportPos) && !isLiquid(ctx, supportPos)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static boolean applyUnderwaterSwimmingInputs(IPlayerContext ctx, MovementState state, BlockPos dest) {
+        if (!shouldSwimUnderwater(ctx, dest)) {
+            setWaterSubmergeLatched(ctx, false);
+            setWaterSurfaceTravelLatched(ctx, false);
+            setWaterAirRecoveryLatched(ctx, false);
+            return false;
+        }
+        boolean headUnderSurface = isHeadUnderWaterSurface(ctx);
+        boolean swimming = ctx.player().isSwimming();
+        boolean recoverAir = shouldRecoverWaterAir(ctx);
+        setWaterAirRecoveryLatched(ctx, recoverAir);
+        boolean wantsSprintSwimming = Baritone.settings().sprintInWater.value
+                && Baritone.settings().allowSprint.value
+                && ctx.player().getFoodData().getFoodLevel() > 6;
+        boolean submergeLatched = isWaterSubmergeLatched(ctx);
+        boolean sprintSwimming = wantsSprintSwimming && swimming;
+        boolean tryStartSwimming = wantsSprintSwimming && headUnderSurface && !swimming;
+        if (sprintSwimming) {
+            setWaterSubmergeLatched(ctx, false);
+            state.setInput(Input.SPRINT, true);
+        } else {
+            setWaterSurfaceTravelLatched(ctx, false);
+        }
+        if (wantsSprintSwimming && (submergeLatched || !headUnderSurface || tryStartSwimming)) {
+            setWaterSubmergeLatched(ctx, true);
+        } else {
+            setWaterSubmergeLatched(ctx, false);
+        }
+        boolean standingOnSolidSupport = canWalkOn(ctx, ctx.playerFeet().below())
+                && !isLiquid(ctx, ctx.playerFeet().below());
+        boolean stuckOnDescendEdge = isUnderwaterDescendEdgeStuck(ctx);
+        double playerY = ctx.player().position().y;
+        double verticalError = playerY - dest.getY();
+        final double swimDeadband = Math.max(0.0D, Baritone.settings().swimDeadband.value);
+        if (recoverAir) {
+            setWaterSubmergeLatched(ctx, false);
+            state.setInput(Input.SNEAK, false);
+            state.setInput(Input.JUMP, true);
+            if (wantsSprintSwimming) {
+                state.setInput(Input.SPRINT, true);
+            } else {
+                state.setInput(Input.SPRINT, false);
+            }
+            return true;
+        }
+        if (isWaterSubmergeLatched(ctx) && !headUnderSurface) {
+            state.setInput(Input.SPRINT, false);
+            if (standingOnSolidSupport || stuckOnDescendEdge) {
+                state.setInput(Input.SNEAK, false);
+                state.setInput(Input.JUMP, false);
+            } else {
+                state.setInput(Input.SNEAK, true);
+                state.setInput(Input.JUMP, false);
+            }
+            return true;
+        }
+        if (tryStartSwimming) {
+            state.setInput(Input.SPRINT, true);
+            state.setInput(Input.SNEAK, false);
+            state.setInput(Input.JUMP, false);
+            return true;
+        }
+        if (!headUnderSurface && !standingOnSolidSupport) {
+            state.setInput(Input.SNEAK, true);
+            state.setInput(Input.JUMP, false);
+            return true;
+        }
+        if (verticalError < -swimDeadband) {
+            state.setInput(Input.JUMP, true);
+            state.setInput(Input.SNEAK, false);
+            return true;
+        }
+        if (verticalError > swimDeadband && !standingOnSolidSupport && !stuckOnDescendEdge) {
+            state.setInput(Input.SNEAK, true);
+            state.setInput(Input.JUMP, false);
+            return true;
+        }
+        state.setInput(Input.JUMP, false);
+        state.setInput(Input.SNEAK, false);
+        return true;
     }
 
     static void moveTowardsWithoutRotation(IPlayerContext ctx, MovementState state, float idealYaw) {

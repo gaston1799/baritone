@@ -42,7 +42,7 @@ import java.util.Set;
 public class MovementPillar extends Movement {
 
     public MovementPillar(IBaritone baritone, BetterBlockPos start, BetterBlockPos end) {
-        super(baritone, start, end, new BetterBlockPos[]{start.above(2)}, start);
+        super(baritone, start, end, topDownClearance(start.above(MovementHelper.pathingPlayerHeight()), 1), start);
     }
 
     @Override
@@ -56,6 +56,7 @@ public class MovementPillar extends Movement {
     }
 
     public static double cost(CalculationContext context, int x, int y, int z) {
+        int playerHeight = context.playerHeight;
         BlockState fromState = context.get(x, y, z);
         Block from = fromState.getBlock();
         boolean ladder = from == Blocks.LADDER || from == Blocks.VINE;
@@ -71,14 +72,14 @@ public class MovementPillar extends Movement {
         if (from == Blocks.VINE && !hasAgainst(context, x, y, z)) { // TODO this vine can't be climbed, but we could place a pillar still since vines are replacable, no? perhaps the pillar jump would be impossible because of the slowdown actually.
             return COST_INF;
         }
-        BlockState toBreak = context.get(x, y + 2, z);
+        BlockState toBreak = context.get(x, y + playerHeight, z);
         Block toBreakBlock = toBreak.getBlock();
         if (toBreakBlock instanceof FenceGateBlock) { // see issue #172
             return COST_INF;
         }
         BlockState srcUp = null;
         if (MovementHelper.isWater(toBreak) && MovementHelper.isWater(fromState)) { // TODO should this also be allowed if toBreakBlock is air?
-            srcUp = context.get(x, y + 1, z);
+            srcUp = context.get(x, y + playerHeight - 1, z);
             if (MovementHelper.isWater(srcUp)) {
                 return LADDER_UP_ONE_COST; // allow ascending pillars of water, but only if we're already in one
             }
@@ -104,7 +105,7 @@ public class MovementPillar extends Movement {
             // to ascend here we'd have to break the block we are standing on
             return COST_INF;
         }
-        double hardness = MovementHelper.getMiningDurationTicks(context, x, y + 2, z, toBreak, true);
+        double hardness = MovementHelper.getMiningDurationTicks(context, x, y + playerHeight, z, toBreak, true);
         if (hardness >= COST_INF) {
             return COST_INF;
         }
@@ -112,11 +113,11 @@ public class MovementPillar extends Movement {
             if (toBreakBlock == Blocks.LADDER || toBreakBlock == Blocks.VINE) {
                 hardness = 0; // we won't actually need to break the ladder / vine because we're going to use it
             } else {
-                BlockState check = context.get(x, y + 3, z); // the block on top of the one we're going to break, could it fall on us?
+                BlockState check = context.get(x, y + playerHeight + 1, z); // the block on top of the one we're going to break, could it fall on us?
                 if (check.getBlock() instanceof FallingBlock) {
                     // see MovementAscend's identical check for breaking a falling block above our head
                     if (srcUp == null) {
-                        srcUp = context.get(x, y + 1, z);
+                        srcUp = context.get(x, y + playerHeight - 1, z);
                     }
                     if (!(toBreakBlock instanceof FallingBlock) || !(srcUp.getBlock() instanceof FallingBlock)) {
                         return COST_INF;
@@ -277,7 +278,7 @@ public class MovementPillar extends Movement {
                 state.setInput(Input.SNEAK, true);
             }
         }
-        if (MovementHelper.isWater(ctx, dest.above())) {
+        if (MovementHelper.isWater(ctx, dest.above(MovementHelper.pathingPlayerHeight() - 1))) {
             return true;
         }
         return super.prepared(state);
