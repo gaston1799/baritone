@@ -149,7 +149,7 @@ public class MovementFall extends Movement {
             }
             state.setInput(Input.MOVE_FORWARD, true);
         }
-        Vec3i avoid = Optional.ofNullable(avoid()).map(Direction::getNormal).orElse(null);
+        Vec3i avoid = Optional.ofNullable(avoid()).map(dir -> new Vec3i(dir.getStepX(), dir.getStepY(), dir.getStepZ())).orElse(null);
         if (avoid == null) {
             avoid = src.subtract(dest);
         } else {

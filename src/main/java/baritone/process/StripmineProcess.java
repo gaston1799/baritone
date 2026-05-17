@@ -307,7 +307,7 @@ public final class StripmineProcess extends BaritoneProcessHelper {
 
             // Build set of item types the player is currently carrying
             Set<Item> carrying = new HashSet<>();
-            for (ItemStack s : ctx.player().getInventory().items) {
+            for (ItemStack s : ctx.player().getInventory().getNonEquipmentItems()) {
                 if (!s.isEmpty()) carrying.add(s.getItem());
             }
 
@@ -549,7 +549,7 @@ public final class StripmineProcess extends BaritoneProcessHelper {
             for (Set<Item> cached : chestCache.values()) itemsWithHome.addAll(cached);
 
             boolean hasOrphans = false;
-            for (ItemStack s : ctx.player().getInventory().items) {
+            for (ItemStack s : ctx.player().getInventory().getNonEquipmentItems()) {
                 if (!s.isEmpty() && ORE_DROPS.contains(s.getItem()) && !itemsWithHome.contains(s.getItem())) {
                     hasOrphans = true;
                     break;
@@ -719,14 +719,14 @@ public final class StripmineProcess extends BaritoneProcessHelper {
 
     private int countInInventory(Item item) {
         int total = 0;
-        for (ItemStack s : ctx.player().getInventory().items) {
+        for (ItemStack s : ctx.player().getInventory().getNonEquipmentItems()) {
             if (!s.isEmpty() && s.getItem() == item) total += s.getCount();
         }
         return total;
     }
 
     private boolean hasJunk() {
-        for (ItemStack s : ctx.player().getInventory().items) {
+        for (ItemStack s : ctx.player().getInventory().getNonEquipmentItems()) {
             if (!s.isEmpty() && isJunk(s)) return true;
         }
         return false;
@@ -734,7 +734,7 @@ public final class StripmineProcess extends BaritoneProcessHelper {
 
     private boolean inventoryTooFull() {
         int empty = 0;
-        for (ItemStack s : ctx.player().getInventory().items) {
+        for (ItemStack s : ctx.player().getInventory().getNonEquipmentItems()) {
             if (s.isEmpty()) empty++;
         }
         return empty < Baritone.settings().stripmineInventoryFreeSlots.value;

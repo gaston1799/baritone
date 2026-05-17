@@ -21,20 +21,21 @@ import baritone.Baritone;
 import baritone.api.Settings;
 import baritone.api.utils.Rotation;
 import baritone.api.utils.RotationUtils;
-import com.google.common.collect.Multimap;
+import net.minecraft.core.Holder;
 import net.minecraft.core.NonNullList;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.tags.TagKey;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.attributes.Attribute;
-import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.item.AxeItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.SwordItem;
-import net.minecraft.world.item.TieredItem;
+import net.minecraft.world.item.component.ItemAttributeModifiers;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -42,10 +43,18 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
-import java.util.Objects;
 import java.util.Optional;
 
 public final class SelfDefenceHelper {
+
+    private static final List<TagKey<Item>> MATERIAL_TAGS_PRIORITY = List.of(
+            ItemTags.WOODEN_TOOL_MATERIALS,
+            ItemTags.STONE_TOOL_MATERIALS,
+            ItemTags.IRON_TOOL_MATERIALS,
+            ItemTags.GOLD_TOOL_MATERIALS,
+            ItemTags.DIAMOND_TOOL_MATERIALS,
+            ItemTags.NETHERITE_TOOL_MATERIALS
+    );
 
     public static final double MELEE_REACH = 3.0D;
     public static final int RECENT_THREAT_TICKS = 60;
@@ -163,9 +172,6 @@ public final class SelfDefenceHelper {
             return null;
         }
         Item item = stack.getItem();
-        if (item instanceof SwordItem) {
-            return WeaponFamily.SWORD;
-        }
         if (item instanceof AxeItem) {
             return WeaponFamily.AXE;
         }
@@ -192,17 +198,23 @@ public final class SelfDefenceHelper {
     }
 
     public static int tierLevel(ItemStack stack) {
-        return stack.getItem() instanceof TieredItem
-                ? ((TieredItem) stack.getItem()).getTier().getLevel()
-                : -1;
+        for (int i = 0; i < MATERIAL_TAGS_PRIORITY.size(); i++) {
+            if (stack.is(MATERIAL_TAGS_PRIORITY.get(i))) {
+                return i;
+            }
+        }
+        return -1;
     }
 
-    private static double attributeValue(ItemStack stack, Attribute attribute) {
-        Multimap<Attribute, AttributeModifier> modifiers = stack.getAttributeModifiers(EquipmentSlot.MAINHAND);
-        return modifiers.get(attribute).stream()
-                .filter(Objects::nonNull)
-                .mapToDouble(AttributeModifier::getAmount)
-                .sum();
+    private static double attributeValue(ItemStack stack, Holder<Attribute> attribute) {
+        ItemAttributeModifiers modifiers = stack.getOrDefault(DataComponents.ATTRIBUTE_MODIFIERS, ItemAttributeModifiers.EMPTY);
+        final double[] total = {0.0D};
+        modifiers.forEach(EquipmentSlot.MAINHAND, (holder, modifier) -> {
+            if (holder.equals(attribute)) {
+                total[0] += modifier.amount();
+            }
+        });
+        return total[0];
     }
 
     public enum WeaponFamily {

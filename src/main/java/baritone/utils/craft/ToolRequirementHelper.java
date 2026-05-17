@@ -108,9 +108,9 @@ public final class ToolRequirementHelper {
 
     private static List<ItemStack> inventoryStacks(LocalPlayer player) {
         List<ItemStack> stacks = new ArrayList<>();
-        NonNullList<ItemStack> items = player.getInventory().items;
+        NonNullList<ItemStack> items = player.getInventory().getNonEquipmentItems();
         stacks.addAll(items);
-        stacks.addAll(player.getInventory().offhand);
+        stacks.add(player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.OFFHAND));
         return stacks;
     }
 

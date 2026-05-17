@@ -110,7 +110,8 @@ public final class SpongeSchematic extends StaticSchematic {
         private BlockState deserialize() {
             if (this.blockState == null) {
                 Block block = BuiltInRegistries.BLOCK.get(this.resourceLocation)
-                    ;
+                        .map(net.minecraft.core.Holder.Reference::value)
+                        .orElse(null);
                 if (block == null || block == Blocks.AIR && !BuiltInRegistries.BLOCK.containsKey(this.resourceLocation)) {
                     block = Blocks.AIR;
                 }

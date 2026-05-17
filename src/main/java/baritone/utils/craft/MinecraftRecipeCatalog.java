@@ -17,16 +17,25 @@
 
 package baritone.utils.craft;
 
-import net.minecraft.core.NonNullList;
+import net.minecraft.client.Minecraft;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.CraftingInput;
 import net.minecraft.world.item.crafting.AbstractCookingRecipe;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.item.crafting.SingleRecipeInput;
+import net.minecraft.world.item.crafting.display.RecipeDisplay;
+import net.minecraft.world.item.crafting.display.ShapedCraftingRecipeDisplay;
+import net.minecraft.world.item.crafting.display.ShapelessCraftingRecipeDisplay;
+import net.minecraft.world.item.crafting.display.SlotDisplayContext;
 import net.minecraft.world.level.Level;
 
 import java.util.ArrayList;
@@ -46,14 +55,14 @@ public final class MinecraftRecipeCatalog implements CraftingPlanner.RecipeLooku
 
     public static MinecraftRecipeCatalog create(Level level) {
         RegistryAccess registryAccess = level.registryAccess();
-        RecipeManager recipeManager = level.getRecipeManager();
         Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult = new LinkedHashMap<>();
+        RecipeManager recipeManager = Minecraft.getInstance().getSingleplayerServer() != null
+                ? Minecraft.getInstance().getSingleplayerServer().getRecipeManager()
+                : null;
 
-        addCraftingRecipes(byResult, recipeManager, registryAccess);
-        addCookingRecipes(byResult, recipeManager, registryAccess, RecipeType.SMELTING, CraftingPlanner.StationKind.FURNACE);
-        addCookingRecipes(byResult, recipeManager, registryAccess, RecipeType.BLASTING, CraftingPlanner.StationKind.BLAST_FURNACE);
-        addCookingRecipes(byResult, recipeManager, registryAccess, RecipeType.SMOKING, CraftingPlanner.StationKind.SMOKER);
-        addCookingRecipes(byResult, recipeManager, registryAccess, RecipeType.CAMPFIRE_COOKING, CraftingPlanner.StationKind.CAMPFIRE);
+        if (recipeManager != null) {
+            addRecipes(byResult, level, recipeManager, registryAccess);
+        }
 
         for (List<CraftingPlanner.NormalizedRecipe> recipes : byResult.values()) {
             recipes.sort(Comparator.comparing(recipe -> recipe.id.toString()));
@@ -66,52 +75,102 @@ public final class MinecraftRecipeCatalog implements CraftingPlanner.RecipeLooku
         return byResult.getOrDefault(item, Collections.emptyList());
     }
 
-    private static void addCraftingRecipes(Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult, RecipeManager recipeManager, RegistryAccess registryAccess) {
-        for (CraftingRecipe recipe : recipeManager.getAllRecipesFor(RecipeType.CRAFTING)) {
-            ItemStack result = recipe.getResultItem(registryAccess);
-            if (result.isEmpty()) {
+    private static void addRecipes(Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult, Level level, RecipeManager recipeManager, RegistryAccess registryAccess) {
+        for (RecipeHolder<?> holder : recipeManager.getRecipes()) {
+            Recipe<?> recipe = holder.value();
+            if (recipe instanceof CraftingRecipe craftingRecipe) {
+                addCraftingRecipe(byResult, level, registryAccess, holder.id(), craftingRecipe);
                 continue;
             }
-            CraftingPlanner.StationKind station = recipe.canCraftInDimensions(2, 2)
-                    ? CraftingPlanner.StationKind.HAND_CRAFTING
-                    : CraftingPlanner.StationKind.CRAFTING_TABLE;
-            addRecipe(byResult, new CraftingPlanner.NormalizedRecipe(
-                    recipe.getId(),
-                    station,
-                    result.getItem(),
-                    result.getCount(),
-                    flattenIngredients(recipe.getIngredients()),
-                    false
-            ));
+            if (recipe instanceof AbstractCookingRecipe cookingRecipe) {
+                CraftingPlanner.StationKind station = cookingStation(recipe.getType());
+                if (station != null) {
+                    addCookingRecipe(byResult, level, registryAccess, holder.id(), cookingRecipe, station);
+                }
+            }
         }
     }
 
-    private static <T extends AbstractCookingRecipe> void addCookingRecipes(Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult, RecipeManager recipeManager, RegistryAccess registryAccess, RecipeType<T> type, CraftingPlanner.StationKind station) {
-        for (T recipe : recipeManager.getAllRecipesFor(type)) {
-            ItemStack result = recipe.getResultItem(registryAccess);
-            if (result.isEmpty()) {
-                continue;
-            }
-            List<CraftingPlanner.IngredientChoice> ingredients = flattenIngredients(recipe.getIngredients());
-            if (ingredients.isEmpty()) {
-                continue;
-            }
-            addRecipe(byResult, new CraftingPlanner.NormalizedRecipe(
-                    recipe.getId(),
-                    station,
-                    result.getItem(),
-                    result.getCount(),
-                    ingredients,
-                    true
-            ));
+    private static void addCraftingRecipe(Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult, Level level, RegistryAccess registryAccess, ResourceKey<Recipe<?>> recipeId, CraftingRecipe recipe) {
+        ItemStack result = recipeResult(level, registryAccess, recipe, CraftingInput.EMPTY);
+        if (result.isEmpty()) {
+            return;
         }
+        addRecipe(byResult, new CraftingPlanner.NormalizedRecipe(
+                recipeId.location(),
+                isHandCraftable(recipe) ? CraftingPlanner.StationKind.HAND_CRAFTING : CraftingPlanner.StationKind.CRAFTING_TABLE,
+                result.getItem(),
+                result.getCount(),
+                flattenIngredients(recipe.placementInfo().ingredients()),
+                false
+        ));
+    }
+
+    private static void addCookingRecipe(Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult, Level level, RegistryAccess registryAccess, ResourceKey<Recipe<?>> recipeId, AbstractCookingRecipe recipe, CraftingPlanner.StationKind station) {
+        ItemStack result = recipeResult(level, registryAccess, recipe, new SingleRecipeInput(ItemStack.EMPTY));
+        if (result.isEmpty()) {
+            return;
+        }
+        List<CraftingPlanner.IngredientChoice> ingredients = flattenIngredients(recipe.placementInfo().ingredients());
+        if (ingredients.isEmpty()) {
+            return;
+        }
+        addRecipe(byResult, new CraftingPlanner.NormalizedRecipe(
+                recipeId.location(),
+                station,
+                result.getItem(),
+                result.getCount(),
+                ingredients,
+                true
+        ));
+    }
+
+    private static <T extends net.minecraft.world.item.crafting.RecipeInput> ItemStack recipeResult(Level level, RegistryAccess registryAccess, Recipe<T> recipe, T input) {
+        ItemStack displayResult = ItemStack.EMPTY;
+        for (RecipeDisplay display : recipe.display()) {
+            ItemStack resolved = display.result().resolveForFirstStack(SlotDisplayContext.fromLevel(level));
+            if (resolved.isEmpty()) {
+                continue;
+            }
+            displayResult = resolved;
+            break;
+        }
+        return displayResult.isEmpty() ? recipe.assemble(input, registryAccess) : displayResult;
+    }
+
+    private static CraftingPlanner.StationKind cookingStation(RecipeType<?> type) {
+        if (type == RecipeType.SMELTING) {
+            return CraftingPlanner.StationKind.FURNACE;
+        }
+        if (type == RecipeType.BLASTING) {
+            return CraftingPlanner.StationKind.BLAST_FURNACE;
+        }
+        if (type == RecipeType.SMOKING) {
+            return CraftingPlanner.StationKind.SMOKER;
+        }
+        if (type == RecipeType.CAMPFIRE_COOKING) {
+            return CraftingPlanner.StationKind.CAMPFIRE;
+        }
+        return null;
+    }
+
+    private static boolean isHandCraftable(CraftingRecipe recipe) {
+        for (RecipeDisplay display : recipe.display()) {
+            if (display instanceof ShapedCraftingRecipeDisplay shaped) {
+                return shaped.width() <= 2 && shaped.height() <= 2;
+            }
+            if (display instanceof ShapelessCraftingRecipeDisplay shapeless) {
+                return shapeless.ingredients().size() <= 4;
+            }
+        }
+        return recipe.placementInfo().ingredients().size() <= 4;
     }
 
     private static void addRecipe(Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult, CraftingPlanner.NormalizedRecipe recipe) {
         byResult.computeIfAbsent(recipe.result, ignored -> new ArrayList<>()).add(recipe);
     }
 
-    private static List<CraftingPlanner.IngredientChoice> flattenIngredients(NonNullList<Ingredient> ingredients) {
+    private static List<CraftingPlanner.IngredientChoice> flattenIngredients(List<Ingredient> ingredients) {
         Map<String, List<Item>> groupedOptions = new LinkedHashMap<>();
         Map<String, Integer> counts = new LinkedHashMap<>();
         for (Ingredient ingredient : ingredients) {
@@ -119,11 +178,7 @@ public final class MinecraftRecipeCatalog implements CraftingPlanner.RecipeLooku
                 continue;
             }
             List<Item> options = new ArrayList<>();
-            for (ItemStack stack : ingredient.getItems()) {
-                if (!stack.isEmpty()) {
-                    options.add(stack.getItem());
-                }
-            }
+            ingredient.items().map(holder -> holder.value()).forEach(options::add);
             if (options.isEmpty()) {
                 continue;
             }

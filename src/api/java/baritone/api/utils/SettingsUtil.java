@@ -253,6 +253,47 @@ public class SettingsUtil {
                 },
                 item -> BuiltInRegistries.ITEM.getKey(item).toString()
         ),
+        ENUM() {
+            @Override
+            public Object parse(Type type, String raw) {
+                Class<?> enumClass = TypeUtils.resolveBaseClass(type);
+                String normalized = normalizeEnumName(raw);
+                return Stream.of(enumClass.getEnumConstants())
+                        .filter(Objects::nonNull)
+                        .filter(constant -> normalizeEnumName(((Enum<?>) constant).name()).equals(normalized))
+                        .findFirst()
+                        .orElseThrow(() -> new IllegalArgumentException("No enum constant " + enumClass.getName() + " for " + raw));
+            }
+
+            @Override
+            public String toString(Type type, Object value) {
+                return toLowerCamel(((Enum<?>) value).name());
+            }
+
+            @Override
+            public boolean accepts(Type type) {
+                Class<?> baseClass = TypeUtils.resolveBaseClass(type);
+                return baseClass != null && baseClass.isEnum();
+            }
+
+            private String normalizeEnumName(String value) {
+                return value.replace("_", "").replace("-", "").toLowerCase();
+            }
+
+            private String toLowerCamel(String value) {
+                StringBuilder result = new StringBuilder();
+                boolean uppercaseNext = false;
+                for (char c : value.toCharArray()) {
+                    if (c == '_') {
+                        uppercaseNext = true;
+                        continue;
+                    }
+                    result.append(result.isEmpty() ? Character.toLowerCase(c) : uppercaseNext ? Character.toUpperCase(c) : Character.toLowerCase(c));
+                    uppercaseNext = false;
+                }
+                return result.toString();
+            }
+        },
         LIST() {
             @Override
             public Object parse(Type type, String raw) {

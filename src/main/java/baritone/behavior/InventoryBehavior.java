@@ -27,22 +27,25 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.DeathScreen;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.Direction;
+import net.minecraft.core.Holder;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.inventory.ClickType;
-import net.minecraft.world.item.ArmorItem;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.PickaxeItem;
+import net.minecraft.world.item.component.ItemAttributeModifiers;
+import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.item.context.UseOnContext;
-import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.Enchantments;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
+import net.minecraft.world.item.equipment.Equippable;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -187,7 +190,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
         if (Baritone.settings().inventoryMoveOnlyIfStationary.value && !baritone.getInventoryPauserProcess().stationaryForInventoryMove()) {
             return false;
         }
-        NonNullList<ItemStack> invy = ctx.player().getInventory().items;
+        NonNullList<ItemStack> invy = ctx.player().getInventory().getNonEquipmentItems();
         int totemSlot = -1;
         for (int i = 0; i < invy.size(); i++) {
             if (invy.get(i).getItem() == Items.TOTEM_OF_UNDYING) {
@@ -217,7 +220,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
         if (Baritone.settings().inventoryMoveOnlyIfStationary.value && !baritone.getInventoryPauserProcess().stationaryForInventoryMove()) {
             return false;
         }
-        NonNullList<ItemStack> invy = ctx.player().getInventory().items;
+        NonNullList<ItemStack> invy = ctx.player().getInventory().getNonEquipmentItems();
         for (EquipmentSlot slot : ARMOR_EQUIPMENT_SLOTS) {
             int bestInventorySlot = bestArmorForSlot(invy, slot);
             if (bestInventorySlot == -1) {
@@ -255,19 +258,44 @@ public final class InventoryBehavior extends Behavior implements Helper {
     }
 
     private boolean isArmorForSlot(ItemStack stack, EquipmentSlot slot) {
-        return !stack.isEmpty()
-                && stack.getItem() instanceof ArmorItem
-                && ((ArmorItem) stack.getItem()).getEquipmentSlot() == slot;
+        if (stack.isEmpty()) {
+            return false;
+        }
+        Equippable equippable = stack.get(DataComponents.EQUIPPABLE);
+        return equippable != null && equippable.slot() == slot;
     }
 
     private double armorScore(ItemStack stack) {
-        if (stack.isEmpty() || !(stack.getItem() instanceof ArmorItem)) {
+        if (stack.isEmpty()) {
             return 0.0D;
         }
-        ArmorItem armor = (ArmorItem) stack.getItem();
-        int protection = EnchantmentHelper.getItemEnchantmentLevel(Enchantments.ALL_DAMAGE_PROTECTION, stack);
-        return armor.getDefense()
-                + (armor.getToughness() * 0.5D)
+        Equippable equippable = stack.get(DataComponents.EQUIPPABLE);
+        if (equippable == null
+                || (equippable.slot() != EquipmentSlot.HEAD
+                && equippable.slot() != EquipmentSlot.CHEST
+                && equippable.slot() != EquipmentSlot.LEGS
+                && equippable.slot() != EquipmentSlot.FEET)) {
+            return 0.0D;
+        }
+        ItemAttributeModifiers modifiers = stack.getOrDefault(DataComponents.ATTRIBUTE_MODIFIERS, ItemAttributeModifiers.EMPTY);
+        final double[] armor = {0.0D};
+        final double[] toughness = {0.0D};
+        modifiers.forEach(equippable.slot(), (attribute, modifier) -> {
+            if (attribute.is(Attributes.ARMOR.unwrapKey().get())) {
+                armor[0] += modifier.amount();
+            } else if (attribute.is(Attributes.ARMOR_TOUGHNESS.unwrapKey().get())) {
+                toughness[0] += modifier.amount();
+            }
+        });
+        int protection = 0;
+        ItemEnchantments enchantments = stack.getEnchantments();
+        for (Holder<Enchantment> enchantment : enchantments.keySet()) {
+            if (enchantment.is(Enchantments.PROTECTION)) {
+                protection = Math.max(protection, enchantments.getLevel(enchantment));
+            }
+        }
+        return armor[0]
+                + (toughness[0] * 0.5D)
                 + (protection * 1.5D);
     }
 
@@ -320,12 +348,13 @@ public final class InventoryBehavior extends Behavior implements Helper {
     }
 
     private boolean isSelectedFood(LocalPlayer player) {
-        ItemStack selected = player.getInventory().getSelected();
+        ItemStack selected = player.getInventory().getSelectedItem();
         return isAutoEatFood(selected);
     }
 
     private boolean isAutoEatFood(ItemStack stack) {
-        if (stack.isEmpty() || !stack.isEdible()) {
+        FoodProperties food = stack.get(DataComponents.FOOD);
+        if (stack.isEmpty() || food == null) {
             return false;
         }
         if ((stack.getItem() == Items.GOLDEN_APPLE || stack.getItem() == Items.ENCHANTED_GOLDEN_APPLE)
@@ -337,7 +366,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
 
     private boolean selectBestFood(int targetHunger) {
         LocalPlayer player = ctx.player();
-        NonNullList<ItemStack> invy = player.getInventory().items;
+        NonNullList<ItemStack> invy = player.getInventory().getNonEquipmentItems();
         FoodChoice best = null;
         int missingHunger = Math.max(1, targetHunger - player.getFoodData().getFoodLevel());
         boolean conserve = Baritone.settings().autoEatConserveFood.value
@@ -349,18 +378,18 @@ public final class InventoryBehavior extends Behavior implements Helper {
             if (!isAutoEatFood(stack)) {
                 continue;
             }
-            FoodProperties food = stack.getItem().getFoodProperties();
+            FoodProperties food = stack.get(DataComponents.FOOD);
             if (food == null) {
                 continue;
             }
-            highestNutrition = Math.max(highestNutrition, food.getNutrition());
+            highestNutrition = Math.max(highestNutrition, food.nutrition());
         }
         for (int i = 0; i < invy.size(); i++) {
             ItemStack stack = invy.get(i);
             if (!isAutoEatFood(stack)) {
                 continue;
             }
-            FoodProperties food = stack.getItem().getFoodProperties();
+            FoodProperties food = stack.get(DataComponents.FOOD);
             if (food == null) {
                 continue;
             }
@@ -373,7 +402,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
             return false;
         }
         if (best.slot < 9) {
-            player.getInventory().selected = best.slot;
+            player.getInventory().setSelectedSlot(best.slot);
             ctx.playerController().syncHeldItem();
             return true;
         }
@@ -381,7 +410,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
         if (hotbarSlot.isEmpty()) {
             return false;
         }
-        player.getInventory().selected = hotbarSlot.getAsInt();
+        player.getInventory().setSelectedSlot(hotbarSlot.getAsInt());
         ctx.playerController().syncHeldItem();
         return true;
     }
@@ -412,8 +441,8 @@ public final class InventoryBehavior extends Behavior implements Helper {
 
         FoodChoice(int slot, FoodProperties food) {
             this.slot = slot;
-            this.nutrition = food.getNutrition();
-            this.saturation = food.getSaturationModifier();
+            this.nutrition = food.nutrition();
+            this.saturation = food.saturation();
         }
     }
 
@@ -484,7 +513,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
         if (!Baritone.settings().dropTrashItems.value) {
             return false;
         }
-        NonNullList<ItemStack> invy = ctx.player().getInventory().items;
+        NonNullList<ItemStack> invy = ctx.player().getInventory().getNonEquipmentItems();
         for (int i = 9; i < invy.size(); i++) {
             if (tryDropTrashItem(invy, i)) {
                 return true;
@@ -511,7 +540,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
             return false;
         }
         int max = Math.max(0, Baritone.settings().maxAcceptableThrowawayItems.value);
-        NonNullList<ItemStack> invy = ctx.player().getInventory().items;
+        NonNullList<ItemStack> invy = ctx.player().getInventory().getNonEquipmentItems();
         int total = 0;
         for (ItemStack stack : invy) {
             if (Baritone.settings().acceptableThrowawayItems.value.contains(stack.getItem())) {

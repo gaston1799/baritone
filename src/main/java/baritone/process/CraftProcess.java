@@ -48,7 +48,9 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.display.RecipeDisplayEntry;
+import net.minecraft.world.item.crafting.display.RecipeDisplayId;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -273,9 +275,9 @@ public final class CraftProcess extends BaritoneProcessHelper {
             }
             return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
         }
-        Optional<? extends Recipe<?>> recipe = ctx.world().getRecipeManager().byKey(recipeNode.recipe.id);
-        if (recipe.isEmpty()) {
-            return stopWith("Craft blocked: missing runtime recipe " + recipeNode.recipe.id);
+        Optional<RecipeDisplayId> recipeDisplayId = findRecipeDisplayId(recipeNode.recipe);
+        if (recipeDisplayId.isEmpty()) {
+            return stopWith("Craft blocked: missing recipe display " + recipeNode.recipe.id);
         }
         logStep(action.description);
         AbstractContainerMenu menu = ctx.player().containerMenu;
@@ -286,7 +288,7 @@ public final class CraftProcess extends BaritoneProcessHelper {
             waitingCooking = new WaitingCooking(recipeNode.recipe.station, recipeNode.item, recipeNode.recipe.id, recipeNode.missingCount());
             return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
         }
-        ctx.playerController().handlePlaceRecipe(menu.containerId, recipe.get(), false);
+        ctx.playerController().handlePlaceRecipe(menu.containerId, recipeDisplayId.get(), false);
         pendingCraft = new PendingCraft(recipeNode.recipe.station, recipeNode.item, menu.containerId);
         return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
     }
@@ -410,8 +412,8 @@ public final class CraftProcess extends BaritoneProcessHelper {
             return true;
         }
         int remaining = requiredCount;
-        for (int inventorySlot = 0; inventorySlot < ctx.player().getInventory().items.size() && remaining > 0; inventorySlot++) {
-            ItemStack stack = ctx.player().getInventory().items.get(inventorySlot);
+        for (int inventorySlot = 0; inventorySlot < ctx.player().getInventory().getNonEquipmentItems().size() && remaining > 0; inventorySlot++) {
+            ItemStack stack = ctx.player().getInventory().getNonEquipmentItems().get(inventorySlot);
             if (stack.isEmpty() || stack.getItem() != item) {
                 continue;
             }
@@ -475,7 +477,7 @@ public final class CraftProcess extends BaritoneProcessHelper {
     }
 
     private int findFuelInventorySlot() {
-        NonNullList<ItemStack> items = ctx.player().getInventory().items;
+        NonNullList<ItemStack> items = ctx.player().getInventory().getNonEquipmentItems();
         for (int i = 0; i < items.size(); i++) {
             Item item = items.get(i).getItem();
             if (!items.get(i).isEmpty() && isSimpleFuel(item)) {
@@ -501,7 +503,7 @@ public final class CraftProcess extends BaritoneProcessHelper {
 
     private List<FuelCandidate> findFuelCandidates(int operationsNeeded) {
         Map<Item, Integer> counts = new LinkedHashMap<>();
-        addStacks(counts, ctx.player().getInventory().items);
+        addStacks(counts, ctx.player().getInventory().getNonEquipmentItems());
         List<FuelCandidate> candidates = new ArrayList<>();
         for (Map.Entry<Item, Integer> entry : counts.entrySet()) {
             Item item = entry.getKey();
@@ -558,8 +560,8 @@ public final class CraftProcess extends BaritoneProcessHelper {
     }
 
     private int resultSlot(AbstractContainerMenu menu) {
-        if (menu instanceof RecipeBookMenu<?> recipeBookMenu) {
-            return recipeBookMenu.getResultSlotIndex();
+        if (menu instanceof RecipeBookMenu recipeBookMenu) {
+            return 0;
         }
         return 0;
     }
@@ -583,15 +585,79 @@ public final class CraftProcess extends BaritoneProcessHelper {
         }
     }
 
+    private Optional<RecipeDisplayId> findRecipeDisplayId(CraftingPlanner.NormalizedRecipe recipe) {
+        if (ctx.player() == null) {
+            return Optional.empty();
+        }
+        List<CraftingPlanner.IngredientChoice> expectedIngredients = recipe.ingredients;
+        for (var collection : ctx.player().getRecipeBook().getCollections()) {
+            for (RecipeDisplayEntry entry : collection.getRecipes()) {
+                List<ItemStack> results = entry.resultItems(net.minecraft.world.item.crafting.display.SlotDisplayContext.fromLevel(ctx.world()));
+                if (results.isEmpty()) {
+                    continue;
+                }
+                ItemStack result = results.getFirst();
+                if (result.isEmpty() || result.getItem() != recipe.result || result.getCount() != recipe.outputCount) {
+                    continue;
+                }
+                if (!matchesIngredientChoices(expectedIngredients, entry.craftingRequirements().orElse(java.util.List.of()))) {
+                    continue;
+                }
+                return Optional.of(entry.id());
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static boolean matchesIngredientChoices(List<CraftingPlanner.IngredientChoice> expected, List<Ingredient> actualIngredients) {
+        if (expected.isEmpty()) {
+            return actualIngredients.isEmpty();
+        }
+        Map<String, Integer> expectedCounts = ingredientChoiceCounts(expected);
+        Map<String, Integer> actualCounts = ingredientCounts(actualIngredients);
+        return expectedCounts.equals(actualCounts);
+    }
+
+    private static Map<String, Integer> ingredientChoiceCounts(List<CraftingPlanner.IngredientChoice> ingredients) {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (CraftingPlanner.IngredientChoice ingredient : ingredients) {
+            String key = ingredient.options.stream()
+                    .map(CraftProcess::itemId)
+                    .reduce((left, right) -> left + "|" + right)
+                    .orElse("");
+            counts.merge(key, ingredient.count, Integer::sum);
+        }
+        return counts;
+    }
+
+    private static Map<String, Integer> ingredientCounts(List<Ingredient> ingredients) {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (Ingredient ingredient : ingredients) {
+            if (ingredient == null || ingredient.isEmpty()) {
+                continue;
+            }
+            String key = ingredient.items()
+                    .map(holder -> itemId(holder.value()))
+                    .distinct()
+                    .sorted()
+                    .reduce((left, right) -> left + "|" + right)
+                    .orElse("");
+            if (!key.isEmpty()) {
+                counts.merge(key, 1, Integer::sum);
+            }
+        }
+        return counts;
+    }
+
     private boolean ensureInteractionHand() {
-        ItemStack selected = ctx.player().getInventory().getSelected();
+        ItemStack selected = ctx.player().getInventory().getSelectedItem();
         if (selected.isEmpty() || !(selected.getItem() instanceof BlockItem)) {
             return true;
         }
         for (int i = 0; i < 9; i++) {
-            ItemStack stack = ctx.player().getInventory().items.get(i);
+            ItemStack stack = ctx.player().getInventory().getNonEquipmentItems().get(i);
             if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem)) {
-                ctx.player().getInventory().selected = i;
+                ctx.player().getInventory().setSelectedSlot(i);
                 return true;
             }
         }
@@ -599,12 +665,12 @@ public final class CraftProcess extends BaritoneProcessHelper {
             return false;
         }
         for (int i = 9; i < 36; i++) {
-            ItemStack stack = ctx.player().getInventory().items.get(i);
+            ItemStack stack = ctx.player().getInventory().getNonEquipmentItems().get(i);
             if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem)) {
                 InventoryBehavior inventoryBehavior = baritone.getInventoryBehavior();
                 OptionalInt slot = inventoryBehavior.attemptToPutOnHotbarAndGetSlot(i, ignored -> false);
                 if (slot.isPresent()) {
-                    ctx.player().getInventory().selected = slot.getAsInt();
+                    ctx.player().getInventory().setSelectedSlot(slot.getAsInt());
                     return true;
                 }
                 return false;
@@ -614,10 +680,10 @@ public final class CraftProcess extends BaritoneProcessHelper {
     }
 
     private boolean selectHotbarItem(Item item) {
-        NonNullList<ItemStack> items = ctx.player().getInventory().items;
+        NonNullList<ItemStack> items = ctx.player().getInventory().getNonEquipmentItems();
         for (int i = 0; i < 9; i++) {
             if (!items.get(i).isEmpty() && items.get(i).getItem() == item) {
-                ctx.player().getInventory().selected = i;
+                ctx.player().getInventory().setSelectedSlot(i);
                 return true;
             }
         }
@@ -628,7 +694,7 @@ public final class CraftProcess extends BaritoneProcessHelper {
             if (!items.get(i).isEmpty() && items.get(i).getItem() == item) {
                 OptionalInt slot = baritone.getInventoryBehavior().attemptToPutOnHotbarAndGetSlot(i, ignored -> false);
                 if (slot.isPresent()) {
-                    ctx.player().getInventory().selected = slot.getAsInt();
+                    ctx.player().getInventory().setSelectedSlot(slot.getAsInt());
                     return true;
                 }
                 return false;
@@ -756,8 +822,8 @@ public final class CraftProcess extends BaritoneProcessHelper {
 
     private static Map<Item, Integer> snapshotInventory(LocalPlayer player) {
         Map<Item, Integer> inventory = new LinkedHashMap<>();
-        addStacks(inventory, player.getInventory().items);
-        addStacks(inventory, player.getInventory().offhand);
+        addStacks(inventory, player.getInventory().getNonEquipmentItems());
+        addStacks(inventory, java.util.List.of(player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.OFFHAND)));
         return inventory;
     }
 

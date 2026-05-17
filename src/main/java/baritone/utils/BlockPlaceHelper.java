@@ -19,6 +19,7 @@ package baritone.utils;
 
 import baritone.Baritone;
 import baritone.api.utils.IPlayerContext;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.phys.BlockHitResult;
@@ -43,7 +44,7 @@ public class BlockPlaceHelper {
         if (!rightClickRequested || ctx.player().isHandsBusy()) {
             return;
         }
-        if (ctx.player().canEat(false) && ctx.player().getMainHandItem().isEdible()) {
+        if (ctx.player().canEat(false) && ctx.player().getMainHandItem().has(DataComponents.CONSUMABLE)) {
             rightClickTimer = Baritone.settings().rightClickSpeed.value - BASE_PLACE_DELAY;
             ctx.playerController().syncHeldItem();
             ctx.playerController().processRightClick(ctx.player(), ctx.world(), InteractionHand.MAIN_HAND);

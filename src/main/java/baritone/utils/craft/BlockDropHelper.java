@@ -110,9 +110,7 @@ public final class BlockDropHelper {
         tools.add(new ItemStack(Items.DIAMOND_HOE));
         tools.add(new ItemStack(Items.NETHERITE_HOE));
 
-        ItemStack silkTouch = new ItemStack(Items.DIAMOND_PICKAXE);
-        silkTouch.enchant(Enchantments.SILK_TOUCH, 1);
-        tools.add(silkTouch);
+        tools.add(new ItemStack(Items.DIAMOND_PICKAXE));
 
         return tools.toArray(new ItemStack[0]);
     }

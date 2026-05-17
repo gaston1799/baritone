@@ -121,7 +121,7 @@ public final class BlockOptionalMeta {
                                 .stream()
                                 .map(item -> new ItemStack(item, 1))
                         )
-                        .map(stack -> ((IItemStack) (Object) stack).getBaritoneHash())
+                        .map(BlockOptionalMeta::baritoneHash)
                         .toArray(Integer[]::new)
         );
     }
@@ -140,12 +140,17 @@ public final class BlockOptionalMeta {
     }
 
     public boolean matches(ItemStack stack) {
-        //noinspection ConstantConditions
-        int hash = ((IItemStack) (Object) stack).getBaritoneHash();
-
+        int hash = baritoneHash(stack);
         hash -= stack.getDamageValue();
 
         return stackHashes.contains(hash);
+    }
+
+    private static int baritoneHash(ItemStack stack) {
+        if (((Object) stack) instanceof IItemStack baritoneStack) {
+            return baritoneStack.getBaritoneHash();
+        }
+        return stack.getItem() == null ? -1 : stack.getItem().hashCode() + stack.getDamageValue();
     }
 
     @Override

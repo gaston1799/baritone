@@ -24,14 +24,19 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.EnchantmentEffectComponents;
 import net.minecraft.world.item.enchantment.Enchantments;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
+import net.minecraft.world.item.enchantment.effects.EnchantmentAttributeEffect;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
@@ -40,6 +45,15 @@ public class ToolSet {
     private final Map<Block, Double> breakStrengthCache;
     private final Function<Block, Double> backendCalculation;
     private final LocalPlayer player;
+
+    private static final List<TagKey<Item>> materialTagsPriorityList = List.of(
+            ItemTags.WOODEN_TOOL_MATERIALS,
+            ItemTags.STONE_TOOL_MATERIALS,
+            ItemTags.IRON_TOOL_MATERIALS,
+            ItemTags.GOLD_TOOL_MATERIALS,
+            ItemTags.DIAMOND_TOOL_MATERIALS,
+            ItemTags.NETHERITE_TOOL_MATERIALS
+    );
 
     public ToolSet(LocalPlayer player) {
         breakStrengthCache = new HashMap<>();
@@ -59,14 +73,23 @@ public class ToolSet {
     }
 
     private int getMaterialCost(ItemStack itemStack) {
-        if (itemStack.getItem() instanceof TieredItem tool) {
-            return tool.getTier().getLevel();
+        for (int i = 0; i < materialTagsPriorityList.size(); i++) {
+            TagKey<Item> tag = materialTagsPriorityList.get(i);
+            if (itemStack.is(tag)) {
+                return i;
+            }
         }
         return -1;
     }
 
     public boolean hasSilkTouch(ItemStack stack) {
-        return EnchantmentHelper.getItemEnchantmentLevel(Enchantments.SILK_TOUCH, stack) > 0;
+        ItemEnchantments enchantments = stack.getEnchantments();
+        for (Holder<Enchantment> enchantment : enchantments.keySet()) {
+            if (enchantment.is(Enchantments.SILK_TOUCH) && enchantments.getLevel(enchantment) > 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public int getBestSlot(Block block, boolean preferSilkTouch) {
@@ -141,9 +164,15 @@ public class ToolSet {
 
         float speed = item.getDestroySpeed(state);
         if (speed > 1) {
-            int effLevel = EnchantmentHelper.getItemEnchantmentLevel(Enchantments.BLOCK_EFFICIENCY, item);
-            if (effLevel > 0 && !item.isEmpty()) {
-                speed += effLevel * effLevel + 1;
+            ItemEnchantments itemEnchantments = item.getEnchantments();
+            OUTER: for (Holder<Enchantment> enchantment : itemEnchantments.keySet()) {
+                List<EnchantmentAttributeEffect> effects = enchantment.value().getEffects(EnchantmentEffectComponents.ATTRIBUTES);
+                for (EnchantmentAttributeEffect effect : effects) {
+                    if (effect.attribute().is(Attributes.MINING_EFFICIENCY.unwrapKey().get())) {
+                        speed += effect.amount().calculate(itemEnchantments.getLevel(enchantment));
+                        break OUTER;
+                    }
+                }
             }
         }
 

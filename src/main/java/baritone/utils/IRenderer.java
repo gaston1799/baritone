@@ -166,7 +166,4 @@ public interface IRenderer {
         emitLine(bufferBuilder, stack, start.x - vpX, start.y - vpY, start.z - vpZ, end.x - vpX, end.y - vpY, end.z - vpZ);
     }
 
-    static void emitLine(PoseStack stack, Vec3 start, Vec3 end) {
-        emitLine(tessellator.getBuilder(), stack, start, end);
-    }
 }

@@ -45,6 +45,7 @@ import net.minecraft.world.entity.projectile.FireworkRocketEntity;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.Fireworks;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.AirBlock;
@@ -923,8 +924,8 @@ public final class ElytraBehavior implements Helper {
         if (itemStack.getItem() != Items.FIREWORK_ROCKET) {
             return false;
         }
-        final CompoundTag compound = itemStack.getTagElement("Fireworks");
-        return compound == null || !compound.contains("Explosions");
+        final Fireworks fireworks = itemStack.get(net.minecraft.core.component.DataComponents.FIREWORKS);
+        return fireworks == null || fireworks.explosions().isEmpty();
     }
 
     private static boolean isBoostingFireworks(final ItemStack itemStack) {
@@ -933,9 +934,8 @@ public final class ElytraBehavior implements Helper {
 
     private static OptionalInt getFireworkBoost(final ItemStack itemStack) {
         if (isFireworks(itemStack)) {
-            final CompoundTag compound = itemStack.getTagElement("Fireworks");
-            final byte flight = compound != null ? compound.getByte("Flight") : 0;
-            return OptionalInt.of(flight);
+            final Fireworks fireworks = itemStack.get(net.minecraft.core.component.DataComponents.FIREWORKS);
+            return OptionalInt.of(fireworks != null ? fireworks.flightDuration() : 0);
         }
         return OptionalInt.empty();
     }

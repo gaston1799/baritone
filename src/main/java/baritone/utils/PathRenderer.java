@@ -366,35 +366,26 @@ public final class PathRenderer implements IRenderer {
             }
             drawDankLitGoalBox(bufferBuilder, stack, color, minX, maxX, minZ, maxZ, minY, maxY, y1, y2, setupRender);
         } else if (goal instanceof GoalXZ goalXZ) {
-            minY = ctx.world().getMinBuildHeight();
-            maxY = ctx.world().getMaxBuildHeight();
+            minY = ctx.world().getMinY();
+            maxY = ctx.world().getMaxY();
 
             if (settings.renderGoalXZBeacon.value) {
-                textureManager.bindForSetup(TEXTURE_BEACON_BEAM);
-                if (settings.renderGoalIgnoreDepth.value) {
-                    RenderSystem.disableDepthTest();
-                }
-
                 stack.pushPose();
                 stack.translate(goalXZ.getX() - renderPosX, -renderPosY, goalXZ.getZ() - renderPosZ);
                 BeaconRenderer.renderBeaconBeam(
                         stack,
                         ctx.minecraft().renderBuffers().bufferSource(),
-                        TEXTURE_BEACON_BEAM,
+                        BeaconRenderer.BEAM_LOCATION,
                         settings.renderGoalAnimated.value ? partialTicks : 0,
                         1.0F,
                         settings.renderGoalAnimated.value ? ctx.world().getGameTime() : 0,
                         (int) minY,
                         (int) maxY,
-                        color.getColorComponents(null),
+                        color.getRGB(),
                         0.2F,
                         0.25F
                 );
                 stack.popPose();
-
-                if (settings.renderGoalIgnoreDepth.value) {
-                    RenderSystem.enableDepthTest();
-                }
                 return;
             }
 
