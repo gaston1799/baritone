@@ -21,8 +21,11 @@ import baritone.Baritone;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.world.item.SwordItem;
-import net.minecraft.world.item.TieredItem;
+import net.minecraft.world.item.component.Tool;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.block.Block;
@@ -56,14 +59,22 @@ public class ToolSet {
     }
 
     private int getMaterialCost(ItemStack itemStack) {
-        if (itemStack.getItem() instanceof TieredItem tool) {
-            return tool.getTier().getLevel();
-        }
-        return -1;
+        Tool tool = itemStack.get(DataComponents.TOOL);
+        return tool == null ? -1 : materialLevel(tool);
+    }
+
+    private static int materialLevel(Tool tool) {
+        float speed = tool.defaultMiningSpeed();
+        if (speed >= 12.0F) return 0; // gold
+        if (speed >= 9.0F) return 4;  // netherite
+        if (speed >= 8.0F) return 3;  // diamond
+        if (speed >= 6.0F) return 2;  // iron
+        if (speed >= 4.0F) return 1;  // stone
+        return 0;                     // wood
     }
 
     public boolean hasSilkTouch(ItemStack stack) {
-        return EnchantmentHelper.getItemEnchantmentLevel(Enchantments.SILK_TOUCH, stack) > 0;
+        return EnchantmentHelper.getItemEnchantmentLevel(player.registryAccess().lookupOrThrow(Registries.ENCHANTMENT).getOrThrow(Enchantments.SILK_TOUCH), stack) > 0;
     }
 
     public int getBestSlot(Block block, boolean preferSilkTouch) {
@@ -138,7 +149,7 @@ public class ToolSet {
 
         float speed = item.getDestroySpeed(state);
         if (speed > 1) {
-            int effLevel = EnchantmentHelper.getItemEnchantmentLevel(Enchantments.BLOCK_EFFICIENCY, item);
+            int effLevel = EnchantmentHelper.getItemEnchantmentLevel(Minecraft.getInstance().level.registryAccess().lookupOrThrow(Registries.ENCHANTMENT).getOrThrow(Enchantments.EFFICIENCY), item);
             if (effLevel > 0 && !item.isEmpty()) {
                 speed += effLevel * effLevel + 1;
             }

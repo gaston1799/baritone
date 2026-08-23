@@ -61,7 +61,7 @@ import java.util.List;
 
 public final class PathRenderer implements IRenderer {
 
-    private static final ResourceLocation TEXTURE_BEACON_BEAM = new ResourceLocation("textures/entity/beacon_beam.png");
+    private static final ResourceLocation TEXTURE_BEACON_BEAM = ResourceLocation.parse("textures/entity/beacon_beam.png");
 
     private PathRenderer() {}
 
@@ -362,11 +362,11 @@ public final class PathRenderer implements IRenderer {
             }
             drawDankLitGoalBox(stack, color, minX, maxX, minZ, maxZ, minY, maxY, y1, y2, setupRender);
         } else if (goal instanceof GoalXZ goalXZ) {
-            minY = ctx.world().getMinBuildHeight();
-            maxY = ctx.world().getMaxBuildHeight();
+            minY = ctx.world().getMinY();
+            maxY = ctx.world().getMaxY();
 
             if (settings.renderGoalXZBeacon.value) {
-                textureManager.bindForSetup(TEXTURE_BEACON_BEAM);
+                textureManager.getTexture(TEXTURE_BEACON_BEAM).bind();
                 if (settings.renderGoalIgnoreDepth.value) {
                     RenderSystem.disableDepthTest();
                 }
@@ -382,7 +382,7 @@ public final class PathRenderer implements IRenderer {
                         settings.renderGoalAnimated.value ? ctx.world().getGameTime() : 0,
                         (int) minY,
                         (int) maxY,
-                        color.getColorComponents(null),
+                        color.getRGB(),
                         0.2F,
                         0.25F
                 );

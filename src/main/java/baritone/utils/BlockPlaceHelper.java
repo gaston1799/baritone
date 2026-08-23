@@ -43,7 +43,7 @@ public class BlockPlaceHelper {
         if (!rightClickRequested || ctx.player().isHandsBusy()) {
             return;
         }
-        if (ctx.player().canEat(false) && ctx.player().getMainHandItem().isEdible()) {
+        if (ctx.player().canEat(false) && ctx.player().getMainHandItem().get(net.minecraft.core.component.DataComponents.FOOD) != null) {
             rightClickTimer = Baritone.settings().rightClickSpeed.value - BASE_PLACE_DELAY;
             ctx.playerController().syncHeldItem();
             ctx.playerController().processRightClick(ctx.player(), ctx.world(), InteractionHand.MAIN_HAND);

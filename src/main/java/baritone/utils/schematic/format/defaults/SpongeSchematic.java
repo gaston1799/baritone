@@ -110,8 +110,7 @@ public final class SpongeSchematic extends StaticSchematic {
 
         private BlockState deserialize() {
             if (this.blockState == null) {
-                Block block = BuiltInRegistries.BLOCK.get(this.resourceLocation)
-                    ;
+                Block block = BuiltInRegistries.BLOCK.getOptional(this.resourceLocation).orElse(Blocks.AIR);
                 if (block == null || block == Blocks.AIR && !BuiltInRegistries.BLOCK.containsKey(this.resourceLocation)) {
                     block = Blocks.AIR;
                 }

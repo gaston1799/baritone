@@ -254,19 +254,19 @@ public final class InventoryBehavior extends Behavior implements Helper {
     }
 
     private boolean isArmorForSlot(ItemStack stack, EquipmentSlot slot) {
+        net.minecraft.world.item.equipment.Equippable equippable = stack.get(net.minecraft.core.component.DataComponents.EQUIPPABLE);
         return !stack.isEmpty()
                 && stack.getItem() instanceof ArmorItem
-                && ((ArmorItem) stack.getItem()).getEquipmentSlot() == slot;
+                && equippable != null
+                && equippable.slot() == slot;
     }
 
     private double armorScore(ItemStack stack) {
         if (stack.isEmpty() || !(stack.getItem() instanceof ArmorItem)) {
             return 0.0D;
         }
-        ArmorItem armor = (ArmorItem) stack.getItem();
-        int protection = EnchantmentHelper.getItemEnchantmentLevel(Enchantments.ALL_DAMAGE_PROTECTION, stack);
-        return armor.getDefense()
-                + (armor.getToughness() * 0.5D)
+        int protection = EnchantmentHelper.getItemEnchantmentLevel(ctx.player().registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT).getOrThrow(Enchantments.PROTECTION), stack);
+        return 1.0D
                 + (protection * 1.5D);
     }
 
@@ -324,7 +324,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
     }
 
     private boolean isAutoEatFood(ItemStack stack) {
-        if (stack.isEmpty() || !stack.isEdible()) {
+        if (stack.isEmpty() || stack.get(net.minecraft.core.component.DataComponents.FOOD) == null) {
             return false;
         }
         if ((stack.getItem() == Items.GOLDEN_APPLE || stack.getItem() == Items.ENCHANTED_GOLDEN_APPLE)
@@ -348,18 +348,18 @@ public final class InventoryBehavior extends Behavior implements Helper {
             if (!isAutoEatFood(stack)) {
                 continue;
             }
-            FoodProperties food = stack.getItem().getFoodProperties();
+            FoodProperties food = stack.get(net.minecraft.core.component.DataComponents.FOOD);
             if (food == null) {
                 continue;
             }
-            highestNutrition = Math.max(highestNutrition, food.getNutrition());
+            highestNutrition = Math.max(highestNutrition, food.nutrition());
         }
         for (int i = 0; i < invy.size(); i++) {
             ItemStack stack = invy.get(i);
             if (!isAutoEatFood(stack)) {
                 continue;
             }
-            FoodProperties food = stack.getItem().getFoodProperties();
+            FoodProperties food = stack.get(net.minecraft.core.component.DataComponents.FOOD);
             if (food == null) {
                 continue;
             }
@@ -411,8 +411,8 @@ public final class InventoryBehavior extends Behavior implements Helper {
 
         FoodChoice(int slot, FoodProperties food) {
             this.slot = slot;
-            this.nutrition = food.getNutrition();
-            this.saturation = food.getSaturationModifier();
+            this.nutrition = food.nutrition();
+            this.saturation = food.saturation();
         }
     }
 

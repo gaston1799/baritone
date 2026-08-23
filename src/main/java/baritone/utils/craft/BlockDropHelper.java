@@ -19,6 +19,7 @@ package baritone.utils.craft;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -47,8 +48,8 @@ import java.util.List;
 public final class BlockDropHelper {
 
     private static final Minecraft CLIENT = Minecraft.getInstance();
-    private static final ItemStack[] SAMPLE_TOOLS = createSampleTools();
     private static final ServerLevelStub STUB_LEVEL = ServerLevelStub.fastCreate();
+    private static final ItemStack[] SAMPLE_TOOLS = createSampleTools();
 
     private BlockDropHelper() {
     }
@@ -111,7 +112,11 @@ public final class BlockDropHelper {
         tools.add(new ItemStack(Items.NETHERITE_HOE));
 
         ItemStack silkTouch = new ItemStack(Items.DIAMOND_PICKAXE);
-        silkTouch.enchant(Enchantments.SILK_TOUCH, 1);
+        Minecraft client = Minecraft.getInstance();
+        Level clientLevel = client != null ? client.level : null;
+        if (clientLevel != null) {
+            silkTouch.enchant(clientLevel.registryAccess().lookupOrThrow(Registries.ENCHANTMENT).getOrThrow(Enchantments.SILK_TOUCH), 1);
+        }
         tools.add(silkTouch);
 
         return tools.toArray(new ItemStack[0]);

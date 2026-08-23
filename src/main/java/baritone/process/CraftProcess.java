@@ -30,6 +30,8 @@ import baritone.utils.craft.CraftAutomationPlanner;
 import baritone.utils.craft.CraftingPlanner;
 import baritone.utils.craft.MinecraftRecipeCatalog;
 import baritone.utils.craft.MinecraftSourceLookup;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.recipebook.RecipeCollection;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -44,6 +46,9 @@ import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.CraftingMenu;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.inventory.RecipeBookMenu;
+import net.minecraft.world.item.crafting.display.RecipeDisplayEntry;
+import net.minecraft.world.item.crafting.display.RecipeDisplayId;
+import net.minecraft.world.item.crafting.display.SlotDisplay;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
@@ -273,9 +278,9 @@ public final class CraftProcess extends BaritoneProcessHelper {
             }
             return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
         }
-        Optional<? extends Recipe<?>> recipe = ctx.world().getRecipeManager().byKey(recipeNode.recipe.id);
-        if (recipe.isEmpty()) {
-            return stopWith("Craft blocked: missing runtime recipe " + recipeNode.recipe.id);
+        RecipeDisplayId displayId = findRecipeDisplayId(recipeNode.item);
+        if (displayId == null) {
+            return stopWith("Craft blocked: recipe book has no recipe producing " + recipeNode.itemId());
         }
         logStep(action.description);
         AbstractContainerMenu menu = ctx.player().containerMenu;
@@ -286,7 +291,7 @@ public final class CraftProcess extends BaritoneProcessHelper {
             waitingCooking = new WaitingCooking(recipeNode.recipe.station, recipeNode.item, recipeNode.recipe.id, recipeNode.missingCount());
             return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
         }
-        ctx.playerController().handlePlaceRecipe(menu.containerId, recipe.get(), false);
+        ctx.playerController().handlePlaceRecipe(menu.containerId, displayId, false);
         pendingCraft = new PendingCraft(recipeNode.recipe.station, recipeNode.item, menu.containerId);
         return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
     }
@@ -558,10 +563,32 @@ public final class CraftProcess extends BaritoneProcessHelper {
     }
 
     private int resultSlot(AbstractContainerMenu menu) {
-        if (menu instanceof RecipeBookMenu<?> recipeBookMenu) {
-            return recipeBookMenu.getResultSlotIndex();
+        if (menu instanceof CraftingMenu craftingMenu) {
+            return craftingMenu.getResultSlot().index;
         }
         return 0;
+    }
+
+    private RecipeDisplayId findRecipeDisplayId(Item resultItem) {
+        LocalPlayer player = ctx.minecraft().player;
+        if (player == null) {
+            return null;
+        }
+        for (RecipeCollection collection : player.getRecipeBook().getCollections()) {
+            for (RecipeDisplayEntry entry : collection.getRecipes()) {
+                SlotDisplay result = entry.display().result();
+                if (result instanceof SlotDisplay.ItemStackSlotDisplay stackDisplay) {
+                    if (stackDisplay.stack().getItem() == resultItem) {
+                        return entry.id();
+                    }
+                } else if (result instanceof SlotDisplay.ItemSlotDisplay itemDisplay) {
+                    if (itemDisplay.item().value() == resultItem) {
+                        return entry.id();
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     private boolean currentMenuMatches(CraftingPlanner.StationKind station) {

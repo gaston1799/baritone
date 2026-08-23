@@ -103,7 +103,7 @@ public class MovementParkour extends Movement implements ParkourDebuggable {
         if (!context.allowParkour) {
             return;
         }
-        if (!context.allowJumpAtBuildLimit && y >= context.world.getMaxBuildHeight()) {
+        if (!context.allowJumpAtBuildLimit && y >= context.world.getMaxY()) {
             return;
         }
         int xDiff = dir.getStepX();

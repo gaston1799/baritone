@@ -126,11 +126,11 @@ public final class MinecraftSourceLookup implements CraftingPlanner.SourceLookup
         }
         List<Block> variants = new ArrayList<>(2);
         Block base = path.startsWith("deepslate_")
-                ? BuiltInRegistries.BLOCK.getOptional(new ResourceLocation(key.getNamespace(), path.substring("deepslate_".length()))).orElse(null)
+                ? BuiltInRegistries.BLOCK.getOptional(ResourceLocation.fromNamespaceAndPath(key.getNamespace(), path.substring("deepslate_".length()))).orElse(null)
                 : block;
         Block deepslate = path.startsWith("deepslate_")
                 ? block
-                : BuiltInRegistries.BLOCK.getOptional(new ResourceLocation(key.getNamespace(), "deepslate_" + path)).orElse(null);
+                : BuiltInRegistries.BLOCK.getOptional(ResourceLocation.fromNamespaceAndPath(key.getNamespace(), "deepslate_" + path)).orElse(null);
         if (base != null) {
             variants.add(base);
         }

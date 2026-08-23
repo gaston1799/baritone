@@ -307,6 +307,35 @@ public class SettingsUtil {
             public boolean accepts(Type type) {
                 return Map.class.isAssignableFrom(TypeUtils.resolveBaseClass(type));
             }
+        },
+        ENUM() {
+            @Override
+            public Object parse(Type type, String raw) {
+                Class<?> enumClass = (Class<?>) type;
+                String normalized = raw.trim().toLowerCase(java.util.Locale.US).replace("_", "").replace(" ", "");
+                for (Object constant : enumClass.getEnumConstants()) {
+                    Enum<?> e = (Enum<?>) constant;
+                    if (e.name().toLowerCase(java.util.Locale.US).replace("_", "").equals(normalized)) {
+                        return e;
+                    }
+                }
+                throw new IllegalArgumentException("No enum constant " + raw + " in " + enumClass.getSimpleName());
+            }
+
+            @Override
+            public String toString(Type type, Object value) {
+                String[] parts = ((Enum<?>) value).name().toLowerCase(java.util.Locale.US).split("_");
+                StringBuilder sb = new StringBuilder(parts[0]);
+                for (int i = 1; i < parts.length; i++) {
+                    sb.append(Character.toUpperCase(parts[i].charAt(0))).append(parts[i].substring(1));
+                }
+                return sb.toString();
+            }
+
+            @Override
+            public boolean accepts(Type type) {
+                return type instanceof Class && ((Class<?>) type).isEnum();
+            }
         };
 
         private final Class<?> cla$$;

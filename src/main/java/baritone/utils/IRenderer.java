@@ -28,7 +28,9 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.GameRenderer;
+import com.mojang.blaze3d.vertex.BufferUploader;
+import net.minecraft.client.renderer.CoreShaders;
+import com.mojang.blaze3d.vertex.MeshData;
 import net.minecraft.client.renderer.texture.TextureManager;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -40,7 +42,6 @@ import java.awt.Color;
 public interface IRenderer {
 
     Tesselator tessellator = Tesselator.getInstance();
-    BufferBuilder buffer = tessellator.getBuilder();
     IEntityRenderManager renderManager = (IEntityRenderManager) Minecraft.getInstance().getEntityRenderDispatcher();
     TextureManager textureManager = Minecraft.getInstance().getTextureManager();
     Settings settings = BaritoneAPI.getSettings();
@@ -57,7 +58,7 @@ public interface IRenderer {
 
     static void startLines(Color color, float alpha, float lineWidth, boolean ignoreDepth) {
         RenderSystem.enableBlend();
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
+        RenderSystem.setShader(CoreShaders.POSITION_COLOR);
         RenderSystem.blendFuncSeparate(
                 GlStateManager.SourceFactor.SRC_ALPHA,
                 GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA,
@@ -72,8 +73,8 @@ public interface IRenderer {
         if (ignoreDepth) {
             RenderSystem.disableDepthTest();
         }
-        RenderSystem.setShader(GameRenderer::getRendertypeLinesShader);
-        buffer.begin(VertexFormat.Mode.LINES, DefaultVertexFormat.POSITION_COLOR_NORMAL);
+        RenderSystem.setShader(CoreShaders.RENDERTYPE_LINES);
+        RendererBuffer.buffer = tessellator.begin(VertexFormat.Mode.LINES, DefaultVertexFormat.POSITION_COLOR_NORMAL);
     }
 
     static void startLines(Color color, float lineWidth, boolean ignoreDepth) {
@@ -81,7 +82,10 @@ public interface IRenderer {
     }
 
     static void endLines(boolean ignoredDepth) {
-        tessellator.end();
+        MeshData meshData = RendererBuffer.buffer.build();
+        if (meshData != null) {
+            BufferUploader.drawWithShader(meshData);
+        }
         if (ignoredDepth) {
             RenderSystem.enableDepthTest();
         }
@@ -119,11 +123,10 @@ public interface IRenderer {
                          float x1, float y1, float z1,
                          float x2, float y2, float z2,
                          float nx, float ny, float nz) {
-        final Matrix4f matrix4f = stack.last().pose();
-        final Matrix3f normal = stack.last().normal();
+        final PoseStack.Pose pose = stack.last();
 
-        buffer.vertex(matrix4f, x1, y1, z1).color(color[0], color[1], color[2], color[3]).normal(normal, nx, ny, nz).endVertex();
-        buffer.vertex(matrix4f, x2, y2, z2).color(color[0], color[1], color[2], color[3]).normal(normal, nx, ny, nz).endVertex();
+        RendererBuffer.buffer.addVertex(pose, x1, y1, z1).setColor(color[0], color[1], color[2], color[3]).setNormal(pose, nx, ny, nz);
+        RendererBuffer.buffer.addVertex(pose, x2, y2, z2).setColor(color[0], color[1], color[2], color[3]).setNormal(pose, nx, ny, nz);
     }
 
     static void emitAABB(PoseStack stack, AABB aabb) {
@@ -155,4 +158,8 @@ public interface IRenderer {
         double vpZ = renderManager.renderPosZ();
         emitLine(stack, start.x - vpX, start.y - vpY, start.z - vpZ, end.x - vpX, end.y - vpY, end.z - vpZ);
     }
+}
+
+final class RendererBuffer {
+    static BufferBuilder buffer;
 }

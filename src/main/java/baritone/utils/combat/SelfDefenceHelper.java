@@ -30,11 +30,13 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.core.Holder;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.item.AxeItem;
+import net.minecraft.world.item.component.Tool;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.SwordItem;
-import net.minecraft.world.item.TieredItem;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -192,17 +194,27 @@ public final class SelfDefenceHelper {
     }
 
     public static int tierLevel(ItemStack stack) {
-        return stack.getItem() instanceof TieredItem
-                ? ((TieredItem) stack.getItem()).getTier().getLevel()
-                : -1;
+        Tool tool = stack.get(DataComponents.TOOL);
+        if (tool == null) {
+            return -1;
+        }
+        float speed = tool.defaultMiningSpeed();
+        if (speed >= 12.0F) return 0; // gold
+        if (speed >= 9.0F) return 4;  // netherite
+        if (speed >= 8.0F) return 3;  // diamond
+        if (speed >= 6.0F) return 2;  // iron
+        if (speed >= 4.0F) return 1;  // stone
+        return 0;                     // wood
     }
 
-    private static double attributeValue(ItemStack stack, Attribute attribute) {
-        Multimap<Attribute, AttributeModifier> modifiers = stack.getAttributeModifiers(EquipmentSlot.MAINHAND);
-        return modifiers.get(attribute).stream()
-                .filter(Objects::nonNull)
-                .mapToDouble(AttributeModifier::getAmount)
-                .sum();
+    private static double attributeValue(ItemStack stack, Holder<Attribute> attribute) {
+        double[] total = {0.0D};
+        stack.forEachModifier(EquipmentSlot.MAINHAND, (holder, modifier) -> {
+            if (holder.equals(attribute)) {
+                total[0] += modifier.amount();
+            }
+        });
+        return total[0];
     }
 
     public enum WeaponFamily {

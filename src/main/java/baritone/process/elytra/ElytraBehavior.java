@@ -35,6 +35,8 @@ import com.mojang.blaze3d.vertex.BufferBuilder;
 import it.unimi.dsi.fastutil.floats.FloatArrayList;
 import it.unimi.dsi.fastutil.floats.FloatIterator;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.item.component.Fireworks;
 import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
@@ -923,8 +925,8 @@ public final class ElytraBehavior implements Helper {
         if (itemStack.getItem() != Items.FIREWORK_ROCKET) {
             return false;
         }
-        final CompoundTag compound = itemStack.getTagElement("Fireworks");
-        return compound == null || !compound.contains("Explosions");
+        final Fireworks fireworks = itemStack.get(DataComponents.FIREWORKS);
+        return fireworks == null || fireworks.explosions().isEmpty();
     }
 
     private static boolean isBoostingFireworks(final ItemStack itemStack) {
@@ -933,8 +935,8 @@ public final class ElytraBehavior implements Helper {
 
     private static OptionalInt getFireworkBoost(final ItemStack itemStack) {
         if (isFireworks(itemStack)) {
-            final CompoundTag compound = itemStack.getTagElement("Fireworks");
-            final byte flight = compound != null ? compound.getByte("Flight") : 0;
+            final Fireworks fireworks = itemStack.get(DataComponents.FIREWORKS);
+            final byte flight = fireworks != null ? (byte) fireworks.flightDuration() : 0;
             return OptionalInt.of(flight);
         }
         return OptionalInt.empty();

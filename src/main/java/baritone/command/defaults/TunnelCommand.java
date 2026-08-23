@@ -46,7 +46,7 @@ public class TunnelCommand extends Command {
             int depth = Integer.parseInt(args.getArgs().get(2).getValue());
             int minHeight = Math.max(1, Baritone.settings().playerHeight.value) == 1 ? 1 : 2;
 
-            if (width < 1 || height < minHeight || depth < 1 || height > ctx.world().getMaxBuildHeight()) {
+            if (width < 1 || height < minHeight || depth < 1 || height > ctx.world().getMaxY()) {
                 logDirect(String.format(
                         "Width and depth must be at least 1 block; Height must be at least %d block%s, and cannot be greater than the build limit.%s",
                         minHeight,

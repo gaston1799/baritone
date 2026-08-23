@@ -18,7 +18,11 @@
 package baritone.utils.craft;
 
 import net.minecraft.core.NonNullList;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.core.Holder;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -26,7 +30,10 @@ import net.minecraft.world.item.crafting.AbstractCookingRecipe;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeManager;
+import net.minecraft.world.item.crafting.CraftingInput;
+import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.item.crafting.SingleRecipeInput;
 import net.minecraft.world.level.Level;
 
 import java.util.ArrayList;
@@ -46,7 +53,10 @@ public final class MinecraftRecipeCatalog implements CraftingPlanner.RecipeLooku
 
     public static MinecraftRecipeCatalog create(Level level) {
         RegistryAccess registryAccess = level.registryAccess();
-        RecipeManager recipeManager = level.getRecipeManager();
+        RecipeManager recipeManager = clientRecipeManager(level);
+        if (recipeManager == null) {
+            return new MinecraftRecipeCatalog(new LinkedHashMap<>());
+        }
         Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult = new LinkedHashMap<>();
 
         addCraftingRecipes(byResult, recipeManager, registryAccess);
@@ -66,38 +76,58 @@ public final class MinecraftRecipeCatalog implements CraftingPlanner.RecipeLooku
         return byResult.getOrDefault(item, Collections.emptyList());
     }
 
+    private static RecipeManager clientRecipeManager(Level level) {
+        ClientPacketListener connection = Minecraft.getInstance().getConnection();
+        if (connection != null) {
+            return (RecipeManager) connection.recipes();
+        }
+        MinecraftServer server = level.getServer();
+        if (server != null) {
+            return server.getRecipeManager();
+        }
+        return null;
+    }
+
     private static void addCraftingRecipes(Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult, RecipeManager recipeManager, RegistryAccess registryAccess) {
-        for (CraftingRecipe recipe : recipeManager.getAllRecipesFor(RecipeType.CRAFTING)) {
-            ItemStack result = recipe.getResultItem(registryAccess);
+        for (RecipeHolder<?> holder : recipeManager.getRecipes()) {
+            if (holder.value().getType() != RecipeType.CRAFTING) {
+                continue;
+            }
+            CraftingRecipe recipe = (CraftingRecipe) holder.value();
+            ItemStack result = recipe.assemble(CraftingInput.EMPTY, registryAccess);
             if (result.isEmpty()) {
                 continue;
             }
-            CraftingPlanner.StationKind station = recipe.canCraftInDimensions(2, 2)
+            CraftingPlanner.StationKind station = recipe.placementInfo().ingredients().size() <= 4
                     ? CraftingPlanner.StationKind.HAND_CRAFTING
                     : CraftingPlanner.StationKind.CRAFTING_TABLE;
             addRecipe(byResult, new CraftingPlanner.NormalizedRecipe(
-                    recipe.getId(),
+                    holder.id().location(),
                     station,
                     result.getItem(),
                     result.getCount(),
-                    flattenIngredients(recipe.getIngredients()),
+                    flattenIngredients(recipe.placementInfo().ingredients()),
                     false
             ));
         }
     }
 
-    private static <T extends AbstractCookingRecipe> void addCookingRecipes(Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult, RecipeManager recipeManager, RegistryAccess registryAccess, RecipeType<T> type, CraftingPlanner.StationKind station) {
-        for (T recipe : recipeManager.getAllRecipesFor(type)) {
-            ItemStack result = recipe.getResultItem(registryAccess);
+    private static void addCookingRecipes(Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult, RecipeManager recipeManager, RegistryAccess registryAccess, RecipeType<? extends AbstractCookingRecipe> type, CraftingPlanner.StationKind station) {
+        for (RecipeHolder<?> holder : recipeManager.getRecipes()) {
+            if (holder.value().getType() != type) {
+                continue;
+            }
+            AbstractCookingRecipe recipe = (AbstractCookingRecipe) holder.value();
+            ItemStack result = recipe.assemble(new SingleRecipeInput(ItemStack.EMPTY), registryAccess);
             if (result.isEmpty()) {
                 continue;
             }
-            List<CraftingPlanner.IngredientChoice> ingredients = flattenIngredients(recipe.getIngredients());
+            List<CraftingPlanner.IngredientChoice> ingredients = flattenIngredients(recipe.placementInfo().ingredients());
             if (ingredients.isEmpty()) {
                 continue;
             }
             addRecipe(byResult, new CraftingPlanner.NormalizedRecipe(
-                    recipe.getId(),
+                    holder.id().location(),
                     station,
                     result.getItem(),
                     result.getCount(),
@@ -111,7 +141,7 @@ public final class MinecraftRecipeCatalog implements CraftingPlanner.RecipeLooku
         byResult.computeIfAbsent(recipe.result, ignored -> new ArrayList<>()).add(recipe);
     }
 
-    private static List<CraftingPlanner.IngredientChoice> flattenIngredients(NonNullList<Ingredient> ingredients) {
+    private static List<CraftingPlanner.IngredientChoice> flattenIngredients(List<Ingredient> ingredients) {
         Map<String, List<Item>> groupedOptions = new LinkedHashMap<>();
         Map<String, Integer> counts = new LinkedHashMap<>();
         for (Ingredient ingredient : ingredients) {
@@ -119,11 +149,7 @@ public final class MinecraftRecipeCatalog implements CraftingPlanner.RecipeLooku
                 continue;
             }
             List<Item> options = new ArrayList<>();
-            for (ItemStack stack : ingredient.getItems()) {
-                if (!stack.isEmpty()) {
-                    options.add(stack.getItem());
-                }
-            }
+            ingredient.items().forEach(holder -> options.add(holder.value()));
             if (options.isEmpty()) {
                 continue;
             }

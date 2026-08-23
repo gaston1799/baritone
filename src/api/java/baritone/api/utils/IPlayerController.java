@@ -47,7 +47,7 @@ public interface IPlayerController {
 
     void windowClick(int windowId, int slotId, int mouseButton, ClickType type, Player player);
 
-    void handlePlaceRecipe(int windowId, Recipe<?> recipe, boolean craftAll);
+    void handlePlaceRecipe(int windowId, net.minecraft.world.item.crafting.display.RecipeDisplayId recipeDisplayId, boolean craftAll);
 
     GameType getGameType();
 

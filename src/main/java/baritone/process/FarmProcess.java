@@ -297,7 +297,7 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
             }
             if (state.getBlock() instanceof BonemealableBlock) {
                 BonemealableBlock ig = (BonemealableBlock) state.getBlock();
-                if (ig.isValidBonemealTarget(ctx.world(), pos, state, true) && ig.isBonemealSuccess(ctx.world(), ctx.world().random, pos, state)) {
+                if (ig.isValidBonemealTarget(ctx.world(), pos, state) && ig.isBonemealSuccess(ctx.world(), ctx.world().random, pos, state)) {
                     bonemealable.add(pos);
                 }
             }
@@ -351,7 +351,7 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
                 if (!(ctx.world().getBlockState(pos.relative(dir)).getBlock() instanceof AirBlock)) {
                     continue;
                 }
-                Vec3 faceCenter = Vec3.atCenterOf(pos).add(Vec3.atLowerCornerOf(dir.getNormal()).scale(0.5));
+                Vec3 faceCenter = Vec3.atCenterOf(pos).add(Vec3.atLowerCornerOf(dir.getUnitVec3i()).scale(0.5));
                 Optional<Rotation> rot = RotationUtils.reachableOffset(ctx, pos, faceCenter, blockReachDistance, false);
                 if (rot.isPresent() && isSafeToCancel && baritone.getInventoryBehavior().throwaway(true, this::isCocoa)) {
                     HitResult result = RayTraceUtils.rayTraceTowards(ctx.player(), rot.get(), blockReachDistance);

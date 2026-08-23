@@ -132,7 +132,7 @@ public class CraftingPlannerTest {
         CraftingPlanner.PlanNode root = planner.plan(Items.CHEST, 1, Collections.emptyMap());
 
         assertEquals(CraftingPlanner.PlanNode.Kind.RECIPE, root.kind);
-        assertEquals(new ResourceLocation("test", "alpha"), root.recipe.id);
+        assertEquals(ResourceLocation.fromNamespaceAndPath("test", "alpha"), root.recipe.id);
     }
 
     @Test
@@ -140,7 +140,7 @@ public class CraftingPlannerTest {
         CraftingPlanner planner = new CraftingPlanner(
                 recipes(
                         new CraftingPlanner.NormalizedRecipe(
-                                new ResourceLocation("test", "smelt_raw_iron"),
+                                ResourceLocation.fromNamespaceAndPath("test", "smelt_raw_iron"),
                                 CraftingPlanner.StationKind.FURNACE,
                                 Items.IRON_INGOT,
                                 1,
@@ -163,7 +163,7 @@ public class CraftingPlannerTest {
         CraftingPlanner planner = new CraftingPlanner(
                 recipes(
                         new CraftingPlanner.NormalizedRecipe(
-                                new ResourceLocation("test", "blast_iron"),
+                                ResourceLocation.fromNamespaceAndPath("test", "blast_iron"),
                                 CraftingPlanner.StationKind.BLAST_FURNACE,
                                 Items.IRON_INGOT,
                                 1,
@@ -171,7 +171,7 @@ public class CraftingPlannerTest {
                                 true
                         ),
                         new CraftingPlanner.NormalizedRecipe(
-                                new ResourceLocation("test", "smelt_iron"),
+                                ResourceLocation.fromNamespaceAndPath("test", "smelt_iron"),
                                 CraftingPlanner.StationKind.FURNACE,
                                 Items.IRON_INGOT,
                                 1,
@@ -234,7 +234,7 @@ public class CraftingPlannerTest {
         CraftingPlanner.PlanNode root = planner.plan(Items.STICK, 2, Collections.emptyMap());
 
         assertEquals(CraftingPlanner.PlanNode.Kind.RECIPE, root.kind);
-        assertEquals(new ResourceLocation("test", "plank_stick"), root.recipe.id);
+        assertEquals(ResourceLocation.fromNamespaceAndPath("test", "plank_stick"), root.recipe.id);
     }
 
     @Test
@@ -268,7 +268,7 @@ public class CraftingPlannerTest {
 
     private static CraftingPlanner.NormalizedRecipe recipe(Item result, String id, CraftingPlanner.StationKind station, int outputCount, CraftingPlanner.IngredientChoice... ingredients) {
         return new CraftingPlanner.NormalizedRecipe(
-                new ResourceLocation(id),
+                ResourceLocation.parse(id),
                 station,
                 result,
                 outputCount,

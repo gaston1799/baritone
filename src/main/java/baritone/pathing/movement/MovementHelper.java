@@ -33,7 +33,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
+import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.piston.MovingPistonBlock;
 import net.minecraft.world.level.block.state.BlockState;
@@ -51,7 +53,7 @@ import net.minecraft.world.level.pathfinder.PathComputationType;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.item.UseAnim;
+import net.minecraft.world.item.ItemUseAnimation;
 
 import java.util.*;
 
@@ -148,8 +150,8 @@ public interface MovementHelper extends ActionCosts, Helper {
         if (ctx.player() == null || !ctx.player().isUsingItem()) {
             return false;
         }
-        UseAnim animation = ctx.player().getUseItem().getUseAnimation();
-        return animation == UseAnim.EAT || animation == UseAnim.DRINK;
+        ItemUseAnimation animation = ctx.player().getUseItem().getUseAnimation();
+        return animation == ItemUseAnimation.EAT || animation == ItemUseAnimation.DRINK;
     }
 
     static boolean avoidBreaking(BlockStateInterface bsi, int x, int y, int z, BlockState state) {
@@ -268,7 +270,7 @@ public interface MovementHelper extends ActionCosts, Helper {
             return NO;
         }
         try { // A dodgy catch-all at the end, for most blocks with default behaviour this will work, however where blocks are special this will error out, and we can handle it when we have this information
-            if (state.isPathfindable(null, null, PathComputationType.LAND)) {
+            if (state.isPathfindable(PathComputationType.LAND)) {
                 return YES;
             } else {
                 return NO;
@@ -320,7 +322,7 @@ public interface MovementHelper extends ActionCosts, Helper {
         // every block that overrides isPassable with anything more complicated than a "return true;" or "return false;"
         // has already been accounted for above
         // therefore it's safe to not construct a blockpos from our x, y, z ints and instead just pass null
-        return state.isPathfindable(bsi.access, BlockPos.ZERO, PathComputationType.LAND); // workaround for future compatibility =P
+        return state.isPathfindable(PathComputationType.LAND); // workaround for future compatibility =P
     }
 
     static Ternary fullyPassableBlockState(BlockState state) {
@@ -349,7 +351,7 @@ public interface MovementHelper extends ActionCosts, Helper {
         // door, fence gate, liquid, trapdoor have been accounted for, nothing else uses the world or pos parameters
         // at least in 1.12.2 vanilla, that is.....
         try { // A dodgy catch-all at the end, for most blocks with default behaviour this will work, however where blocks are special this will error out, and we can handle it when we have this information
-            if (state.isPathfindable(null, null, PathComputationType.LAND)) {
+            if (state.isPathfindable(PathComputationType.LAND)) {
                 return YES;
             } else {
                 return NO;
@@ -386,7 +388,7 @@ public interface MovementHelper extends ActionCosts, Helper {
     }
 
     static boolean fullyPassablePosition(BlockStateInterface bsi, int x, int y, int z, BlockState state) {
-        return state.isPathfindable(bsi.access, bsi.isPassableBlockPos.set(x, y, z), PathComputationType.LAND);
+        return state.isPathfindable(PathComputationType.LAND);
     }
 
     static boolean isReplaceable(int x, int y, int z, BlockState state, BlockStateInterface bsi) {
@@ -614,7 +616,7 @@ public interface MovementHelper extends ActionCosts, Helper {
 
     static boolean canUseFrostWalker(IPlayerContext ctx, BlockPos pos) {
         BlockState state = BlockStateInterface.get(ctx, pos);
-        return EnchantmentHelper.hasFrostWalker(ctx.player())
+        return EnchantmentHelper.getEnchantmentLevel(ctx.player().registryAccess().lookupOrThrow(Registries.ENCHANTMENT).getOrThrow(Enchantments.FROST_WALKER), ctx.player()) > 0
                 && state == FrostedIceBlock.meltsInto()
                 && ((Integer) state.getValue(LiquidBlock.LEVEL)) == 0;
     }
@@ -859,7 +861,7 @@ public interface MovementHelper extends ActionCosts, Helper {
             return Integer.MIN_VALUE;
         }
         int topWaterY = topOccupiedY;
-        while (topWaterY + 1 < context.world.getMaxBuildHeight() && isWater(context.get(x, topWaterY + 1, z))) {
+        while (topWaterY + 1 < context.world.getMaxY() && isWater(context.get(x, topWaterY + 1, z))) {
             topWaterY++;
         }
         return topWaterY - (context.playerHeight - 1);
@@ -885,11 +887,11 @@ public interface MovementHelper extends ActionCosts, Helper {
         if (!isWater(ctx, new BlockPos(feetPos.getX(), scanY, feetPos.getZ()))) {
             return true;
         }
-        while (scanY + 1 < ctx.world().getMaxBuildHeight()
+        while (scanY + 1 < ctx.world().getMaxY()
                 && isWater(ctx, new BlockPos(feetPos.getX(), scanY + 1, feetPos.getZ()))) {
             scanY++;
         }
-        if (scanY + 1 >= ctx.world().getMaxBuildHeight()) {
+        if (scanY + 1 >= ctx.world().getMaxY()) {
             return false;
         }
         return canWalkThrough(ctx, new BetterBlockPos(feetPos.getX(), scanY + 1, feetPos.getZ()));
@@ -902,8 +904,8 @@ public interface MovementHelper extends ActionCosts, Helper {
         BlockPos feet = ctx.playerFeet();
         int x = feet.getX();
         int z = feet.getZ();
-        int minY = ctx.world().getMinBuildHeight();
-        int maxY = ctx.world().getMaxBuildHeight();
+        int minY = ctx.world().getMinY();
+        int maxY = ctx.world().getMaxY();
         double trackedY = ctx.player().isSwimming()
                 ? ctx.player().position().y
                 : ctx.player().position().y + pathingPlayerHeight();

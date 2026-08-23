@@ -47,7 +47,7 @@ public final class BlockStateOctreeInterface {
         if (this.chunkPtr == 0 | ((chunkX ^ this.prevChunkX) | (chunkZ ^ this.prevChunkZ)) != 0) {
             this.prevChunkX = chunkX;
             this.prevChunkZ = chunkZ;
-            this.chunkPtr = NetherPathfinder.getOrCreateChunk(this.contextPtr, chunkX, chunkZ);
+            this.chunkPtr = NetherPathfinder.allocateAndInsertChunk(this.contextPtr, chunkX, chunkZ);
         }
         return Octree.getBlock(this.chunkPtr, x & 0xF, y & 0x7F, z & 0xF);
     }

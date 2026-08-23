@@ -46,7 +46,7 @@ public enum DefaultSchematicFormats implements ISchematicFormat {
     MCEDIT("schematic") {
         @Override
         public IStaticSchematic parse(InputStream input) throws IOException {
-            return new MCEditSchematic(NbtIo.readCompressed(input));
+            return new MCEditSchematic(NbtIo.readCompressed(input, net.minecraft.nbt.NbtAccounter.create(0x20000000L)));
         }
     },
 
@@ -58,7 +58,7 @@ public enum DefaultSchematicFormats implements ISchematicFormat {
     SPONGE("schem") {
         @Override
         public IStaticSchematic parse(InputStream input) throws IOException {
-            CompoundTag nbt = NbtIo.readCompressed(input);
+            CompoundTag nbt = NbtIo.readCompressed(input, net.minecraft.nbt.NbtAccounter.create(0x20000000L));
             int version = nbt.getInt("Version");
             switch (version) {
                 case 1:
@@ -76,7 +76,7 @@ public enum DefaultSchematicFormats implements ISchematicFormat {
     LITEMATICA("litematic") {
         @Override
         public IStaticSchematic parse(InputStream input) throws IOException {
-            CompoundTag nbt = NbtIo.readCompressed(input);
+            CompoundTag nbt = NbtIo.readCompressed(input, net.minecraft.nbt.NbtAccounter.create(0x20000000L));
             int version = nbt.getInt("Version");
             switch (version) {
                 case 4: //1.12

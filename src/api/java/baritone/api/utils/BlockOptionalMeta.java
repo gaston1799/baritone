@@ -121,7 +121,7 @@ public final class BlockOptionalMeta {
                                 .stream()
                                 .map(item -> new ItemStack(item, 1))
                         )
-                        .map(stack -> ((IItemStack) (Object) stack).getBaritoneHash())
+                        .map(stack -> stack.getItem().hashCode() + stack.getDamageValue())
                         .toArray(Integer[]::new)
         );
     }

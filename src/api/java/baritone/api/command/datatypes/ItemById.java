@@ -49,6 +49,11 @@ public enum ItemById implements IDatatypeFor<Item> {
                                 .stream()
                                 .map(ResourceLocation::toString)
                 )
+                .append(
+                        BuiltInRegistries.ITEM.keySet()
+                                .stream()
+                                .map(ResourceLocation::toString)
+                )
                 .filterPrefixNamespaced(ctx.getConsumer().getString())
                 .sortAlphabetically()
                 .stream();

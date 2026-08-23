@@ -55,7 +55,7 @@ public final class NetherPathfinderContext {
     private final ExecutorService executor;
 
     public NetherPathfinderContext(long seed) {
-        this.context = NetherPathfinder.newContext(seed);
+        this.context = NetherPathfinder.newContext(seed, null, NetherPathfinder.DIMENSION_NETHER, 128, false);
         this.seed = seed;
         this.executor = Executors.newSingleThreadExecutor();
     }
@@ -80,7 +80,7 @@ public final class NetherPathfinderContext {
             //       and prune the oldest chunks per chunkPackerQueueMaxSize
             final LevelChunk chunk = ref.get();
             if (chunk != null) {
-                long ptr = NetherPathfinder.getOrCreateChunk(this.context, chunk.getPos().x, chunk.getPos().z);
+                long ptr = NetherPathfinder.allocateAndInsertChunk(this.context, chunk.getPos().x, chunk.getPos().z);
                 writeChunkData(chunk, ptr);
             }
         });
@@ -89,7 +89,7 @@ public final class NetherPathfinderContext {
     public void queueBlockUpdate(BlockChangeEvent event) {
         this.executor.execute(() -> {
             ChunkPos chunkPos = event.getChunkPos();
-            long ptr = NetherPathfinder.getChunkPointer(this.context, chunkPos.x, chunkPos.z);
+            long ptr = NetherPathfinder.getChunk(this.context, chunkPos.x, chunkPos.z);
             if (ptr == 0) return; // this shouldn't ever happen
             event.getBlocks().forEach(pair -> {
                 BlockPos pos = pair.first();
@@ -109,7 +109,8 @@ public final class NetherPathfinderContext {
                     true,
                     false,
                     10000,
-                    !Baritone.settings().elytraPredictTerrain.value
+                    !Baritone.settings().elytraPredictTerrain.value,
+                    8.0
             );
             if (segment == null) {
                 throw new PathCalculationException("Path calculation failed");
@@ -216,7 +217,6 @@ public final class NetherPathfinderContext {
                     }
                 }
             }
-            Octree.setIsFromJava(ptr);
         } catch (Exception e) {
             e.printStackTrace();
             throw new RuntimeException(e);

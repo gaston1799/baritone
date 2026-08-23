@@ -74,8 +74,8 @@ public final class BaritonePlayerController implements IPlayerController {
     }
 
     @Override
-    public void handlePlaceRecipe(int windowId, Recipe<?> recipe, boolean craftAll) {
-        mc.gameMode.handlePlaceRecipe(windowId, recipe, craftAll);
+    public void handlePlaceRecipe(int windowId, net.minecraft.world.item.crafting.display.RecipeDisplayId recipeDisplayId, boolean craftAll) {
+        mc.gameMode.handlePlaceRecipe(windowId, recipeDisplayId, craftAll);
     }
 
     @Override
