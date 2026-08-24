@@ -114,8 +114,12 @@ public final class SelfDefenceBehavior extends Behavior {
         }
 
         if (!ctx.player().hasLineOfSight(currentTarget) || !SelfDefenceHelper.withinMeleeReach(ctx.playerHead(), currentTarget)) {
-            resetJumpState();
-            releaseCombatInputs();
+            if (maceDivePhase == 4) {
+                handleMaceSmash(); // keep the rocket escape going even if the target left reach
+            } else {
+                resetJumpState();
+                releaseCombatInputs();
+            }
             return;
         }
         Rotation look = SelfDefenceHelper.rotationToTarget(ctx.playerHead(), ctx.playerRotations(), currentTarget);
@@ -444,6 +448,19 @@ public final class SelfDefenceBehavior extends Behavior {
                     resetJumpState();
                     return;
                 }
+                // on the ground right next to a creeper: its fuse ignites at ~3
+                // blocks and the ground-launch dive is too slow - back away first
+                // to break the fuse, then dive from a safe distance
+                if (currentTarget instanceof Creeper
+                        && ctx.playerHead().distanceToSqr(currentTarget.getEyePosition()) < 12.25D) {
+                    Vec3 away = ctx.playerHead().subtract(currentTarget.getEyePosition()).normalize();
+                    float awayYaw = (float) Math.toDegrees(Math.atan2(-away.x, -away.z));
+                    baritone.getLookBehavior().updateTarget(new Rotation(awayYaw, ctx.playerRotations().getPitch()), false);
+                    baritone.getInputOverrideHandler().setInputForceState(Input.MOVE_BACK, true);
+                    resetJumpState();
+                    return;
+                }
+                baritone.getInputOverrideHandler().setInputForceState(Input.MOVE_BACK, false);
                 maceDivePhase = 1;
                 maceDiveTick = tickCounter;
                 jumpAttackQueued = true;
@@ -544,6 +561,7 @@ public final class SelfDefenceBehavior extends Behavior {
         jumpAttackQueued = false;
         releaseJumpInput();
         baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, false);
+        baritone.getInputOverrideHandler().setInputForceState(Input.MOVE_BACK, false);
     }
 
     private void handleJumpCrit() {
@@ -617,6 +635,14 @@ public final class SelfDefenceBehavior extends Behavior {
         if (tickCounter - p.tick() > 4) {
             pendingAttack = null;
             logMiss(p);
+            if (p.attackType() == Settings.AttackType.MACE_SMASH && hasFireworkRocket() && !ctx.player().onGround()) {
+                // missed smash: rocket-escape immediately (no cratering, no creeper
+                // blast - the creeper is ignited and we're still falling next to it),
+                // then re-dive
+                jumpAttackQueued = false;
+                maceDivePhase = 4;
+                maceDiveTick = tickCounter;
+            }
         }
     }
 
