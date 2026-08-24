@@ -20,7 +20,12 @@ package baritone.utils;
 import baritone.api.BaritoneAPI;
 import baritone.api.Settings;
 import baritone.utils.accessor.IEntityRenderManager;
-import com.mojang.blaze3d.platform.GlStateManager;
+import baritone.utils.accessor.IRenderPipelines;
+import com.mojang.blaze3d.pipeline.BlendFunction;
+import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.blaze3d.platform.DepthTestFunction;
+import com.mojang.blaze3d.platform.DestFactor;
+import com.mojang.blaze3d.platform.SourceFactor;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
@@ -28,9 +33,9 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.client.Minecraft;
-import com.mojang.blaze3d.vertex.BufferUploader;
-import net.minecraft.client.renderer.CoreShaders;
 import com.mojang.blaze3d.vertex.MeshData;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.texture.TextureManager;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -45,6 +50,32 @@ public interface IRenderer {
     IEntityRenderManager renderManager = (IEntityRenderManager) Minecraft.getInstance().getEntityRenderDispatcher();
     TextureManager textureManager = Minecraft.getInstance().getTextureManager();
     Settings settings = BaritoneAPI.getSettings();
+    RenderPipeline.Snippet BARITONE_LINES_SNIPPET = RenderPipeline.builder(((IRenderPipelines) new RenderPipelines()).getLinesSnippet())
+        .withBlend(new BlendFunction(
+            SourceFactor.SRC_ALPHA,
+            DestFactor.ONE_MINUS_SRC_ALPHA,
+            SourceFactor.ONE,
+            DestFactor.ZERO
+        ))
+        .withDepthWrite(false)
+        .withCull(false)
+        .buildSnippet();
+    RenderType linesWithDepthRenderType = BaritoneRenderType.create(
+        "renderType/baritone_lines_with_depth",
+        256,
+        RenderPipeline.builder(BARITONE_LINES_SNIPPET)
+            .withLocation("pipelines/baritone_lines_with_depth")
+            .withDepthTestFunction(DepthTestFunction.LEQUAL_DEPTH_TEST)
+            .build()
+    );
+    RenderType linesNoDepthRenderType = BaritoneRenderType.create(
+        "renderType/baritone_lines_no_depth",
+        256,
+        RenderPipeline.builder(BARITONE_LINES_SNIPPET)
+            .withLocation("pipelines/baritone_lines_no_depth")
+            .withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
+            .build()
+    );
 
     float[] color = new float[]{1.0F, 1.0F, 1.0F, 255.0F};
 
@@ -57,23 +88,8 @@ public interface IRenderer {
     }
 
     static void startLines(Color color, float alpha, float lineWidth, boolean ignoreDepth) {
-        RenderSystem.enableBlend();
-        RenderSystem.setShader(CoreShaders.POSITION_COLOR);
-        RenderSystem.blendFuncSeparate(
-                GlStateManager.SourceFactor.SRC_ALPHA,
-                GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA,
-                GlStateManager.SourceFactor.ONE,
-                GlStateManager.DestFactor.ZERO
-        );
         glColor(color, alpha);
         RenderSystem.lineWidth(lineWidth);
-        RenderSystem.depthMask(false);
-        RenderSystem.disableCull();
-
-        if (ignoreDepth) {
-            RenderSystem.disableDepthTest();
-        }
-        RenderSystem.setShader(CoreShaders.RENDERTYPE_LINES);
         RendererBuffer.buffer = tessellator.begin(VertexFormat.Mode.LINES, DefaultVertexFormat.POSITION_COLOR_NORMAL);
     }
 
@@ -84,15 +100,12 @@ public interface IRenderer {
     static void endLines(boolean ignoredDepth) {
         MeshData meshData = RendererBuffer.buffer.build();
         if (meshData != null) {
-            BufferUploader.drawWithShader(meshData);
+            if (ignoredDepth) {
+                linesNoDepthRenderType.draw(meshData);
+            } else {
+                linesWithDepthRenderType.draw(meshData);
+            }
         }
-        if (ignoredDepth) {
-            RenderSystem.enableDepthTest();
-        }
-
-        RenderSystem.enableCull();
-        RenderSystem.depthMask(true);
-        RenderSystem.disableBlend();
     }
 
     static void emitLine(PoseStack stack, double x1, double y1, double z1, double x2, double y2, double z2) {

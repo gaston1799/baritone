@@ -447,7 +447,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
     private OptionalInt hasAnyItemThatWouldPlace(BlockState desired, HitResult result, Rotation rot) {
         for (int i = 0; i < 9; i++) {
-            ItemStack stack = ctx.player().getInventory().items.get(i);
+            ItemStack stack = ctx.player().getInventory().getNonEquipmentItems().get(i);
             if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem)) {
                 continue;
             }
@@ -638,7 +638,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                     + " playerY=" + ctx.playerFeet().y
                     + " incorrectSz=" + (incorrectPositions == null ? -1 : incorrectPositions.size()));
             baritone.getLookBehavior().updateTarget(rot, true);
-            ctx.player().getInventory().selected = toPlace.get().hotbarSelection;
+            ctx.player().getInventory().setSelectedSlot(toPlace.get().hotbarSelection);
             baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
             if ((ctx.isLookingAt(toPlace.get().placeAgainst) && ((BlockHitResult) ctx.objectMouseOver()).getDirection().equals(toPlace.get().side)) || ctx.playerRotations().isReallyCloseTo(rot)) {
                 baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
@@ -1111,7 +1111,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private List<BlockState> approxPlaceable(int size) {
         List<BlockState> result = new ArrayList<>();
         for (int i = 0; i < size; i++) {
-            ItemStack stack = ctx.player().getInventory().items.get(i);
+            ItemStack stack = ctx.player().getInventory().getNonEquipmentItems().get(i);
             if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem)) {
                 result.add(Blocks.AIR.defaultBlockState());
                 continue;

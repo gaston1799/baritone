@@ -87,7 +87,7 @@ public final class MineProcess extends BaritoneProcessHelper implements IMinePro
     @Override
     public PathingCommand onTick(boolean calcFailed, boolean isSafeToCancel) {
         if (desiredQuantity > 0) {
-            int curr = countInventoryItems(ctx.player().getInventory().items, filter, targetDropItems);
+            int curr = countInventoryItems(ctx.player().getInventory().getNonEquipmentItems(), filter, targetDropItems);
             if (curr >= desiredQuantity) {
                 logDirect("Have " + curr + " valid items");
                 cancel();

@@ -1290,7 +1290,7 @@ public final class ElytraBehavior implements Helper {
     }
 
     private int findGoodElytra() {
-        NonNullList<ItemStack> invy = ctx.player().getInventory().items;
+        NonNullList<ItemStack> invy = ctx.player().getInventory().getNonEquipmentItems();
         for (int i = 0; i < invy.size(); i++) {
             ItemStack slot = invy.get(i);
             if (slot.getItem() == Items.ELYTRA && (slot.getMaxDamage() - slot.getDamageValue()) > Baritone.settings().elytraMinimumDurability.value) {

@@ -82,8 +82,8 @@ public class TorchBehavior extends Behavior {
         if (!ctx.isLookingAt(target.pos) && !ctx.playerRotations().isReallyCloseTo(rot.get())) return;
 
         // Switch to torch, place, restore previous slot
-        int prevSlot = ctx.player().getInventory().selected;
-        ctx.player().getInventory().selected = torchSlot;
+        int prevSlot = ctx.player().getInventory().getSelectedSlot();
+        ctx.player().getInventory().setSelectedSlot(torchSlot);
 
         Vec3 hitVec = Vec3.atCenterOf(target.pos).add(
                 target.face.getStepX() * 0.5,
@@ -97,7 +97,7 @@ public class TorchBehavior extends Behavior {
             ctx.player().swing(InteractionHand.MAIN_HAND);
         }
 
-        ctx.player().getInventory().selected = prevSlot;
+        ctx.player().getInventory().setSelectedSlot(prevSlot);
 
         // Mark position regardless of result so we don't spam the same spot
         lastTorchPos = feet;

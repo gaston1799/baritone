@@ -367,7 +367,7 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
             return true;
         }
 
-        NonNullList<ItemStack> inv = ctx.player().getInventory().items;
+        NonNullList<ItemStack> inv = ctx.player().getInventory().getNonEquipmentItems();
         int qty = 0;
         for (int i = 0; i < 36; i++) {
             if (ElytraBehavior.isFireworks(inv.get(i))) {

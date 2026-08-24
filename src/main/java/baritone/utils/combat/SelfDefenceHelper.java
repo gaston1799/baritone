@@ -36,7 +36,6 @@ import net.minecraft.world.item.AxeItem;
 import net.minecraft.world.item.component.Tool;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.SwordItem;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -165,7 +164,7 @@ public final class SelfDefenceHelper {
             return null;
         }
         Item item = stack.getItem();
-        if (item instanceof SwordItem) {
+        if (item.builtInRegistryHolder().is(net.minecraft.tags.ItemTags.SWORDS)) {
             return WeaponFamily.SWORD;
         }
         if (item instanceof AxeItem) {

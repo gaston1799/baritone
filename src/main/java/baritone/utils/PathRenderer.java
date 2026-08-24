@@ -366,17 +366,12 @@ public final class PathRenderer implements IRenderer {
             maxY = ctx.world().getMaxY();
 
             if (settings.renderGoalXZBeacon.value) {
-                textureManager.getTexture(TEXTURE_BEACON_BEAM).bind();
-                if (settings.renderGoalIgnoreDepth.value) {
-                    RenderSystem.disableDepthTest();
-                }
-
                 stack.pushPose();
                 stack.translate(goalXZ.getX() - renderPosX, -renderPosY, goalXZ.getZ() - renderPosZ);
                 BeaconRenderer.renderBeaconBeam(
                         stack,
                         ctx.minecraft().renderBuffers().bufferSource(),
-                        TEXTURE_BEACON_BEAM,
+                        BeaconRenderer.BEAM_LOCATION,
                         settings.renderGoalAnimated.value ? partialTicks : 0,
                         1.0F,
                         settings.renderGoalAnimated.value ? ctx.world().getGameTime() : 0,
@@ -387,10 +382,6 @@ public final class PathRenderer implements IRenderer {
                         0.25F
                 );
                 stack.popPose();
-
-                if (settings.renderGoalIgnoreDepth.value) {
-                    RenderSystem.enableDepthTest();
-                }
                 return;
             }
 

@@ -415,8 +415,8 @@ public final class CraftProcess extends BaritoneProcessHelper {
             return true;
         }
         int remaining = requiredCount;
-        for (int inventorySlot = 0; inventorySlot < ctx.player().getInventory().items.size() && remaining > 0; inventorySlot++) {
-            ItemStack stack = ctx.player().getInventory().items.get(inventorySlot);
+        for (int inventorySlot = 0; inventorySlot < ctx.player().getInventory().getNonEquipmentItems().size() && remaining > 0; inventorySlot++) {
+            ItemStack stack = ctx.player().getInventory().getNonEquipmentItems().get(inventorySlot);
             if (stack.isEmpty() || stack.getItem() != item) {
                 continue;
             }
@@ -480,7 +480,7 @@ public final class CraftProcess extends BaritoneProcessHelper {
     }
 
     private int findFuelInventorySlot() {
-        NonNullList<ItemStack> items = ctx.player().getInventory().items;
+        NonNullList<ItemStack> items = ctx.player().getInventory().getNonEquipmentItems();
         for (int i = 0; i < items.size(); i++) {
             Item item = items.get(i).getItem();
             if (!items.get(i).isEmpty() && isSimpleFuel(item)) {
@@ -506,7 +506,7 @@ public final class CraftProcess extends BaritoneProcessHelper {
 
     private List<FuelCandidate> findFuelCandidates(int operationsNeeded) {
         Map<Item, Integer> counts = new LinkedHashMap<>();
-        addStacks(counts, ctx.player().getInventory().items);
+        addStacks(counts, ctx.player().getInventory().getNonEquipmentItems());
         List<FuelCandidate> candidates = new ArrayList<>();
         for (Map.Entry<Item, Integer> entry : counts.entrySet()) {
             Item item = entry.getKey();
@@ -611,14 +611,14 @@ public final class CraftProcess extends BaritoneProcessHelper {
     }
 
     private boolean ensureInteractionHand() {
-        ItemStack selected = ctx.player().getInventory().getSelected();
+        ItemStack selected = ctx.player().getInventory().getSelectedItem();
         if (selected.isEmpty() || !(selected.getItem() instanceof BlockItem)) {
             return true;
         }
         for (int i = 0; i < 9; i++) {
-            ItemStack stack = ctx.player().getInventory().items.get(i);
+            ItemStack stack = ctx.player().getInventory().getNonEquipmentItems().get(i);
             if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem)) {
-                ctx.player().getInventory().selected = i;
+                ctx.player().getInventory().setSelectedSlot(i);
                 return true;
             }
         }
@@ -626,12 +626,12 @@ public final class CraftProcess extends BaritoneProcessHelper {
             return false;
         }
         for (int i = 9; i < 36; i++) {
-            ItemStack stack = ctx.player().getInventory().items.get(i);
+            ItemStack stack = ctx.player().getInventory().getNonEquipmentItems().get(i);
             if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem)) {
                 InventoryBehavior inventoryBehavior = baritone.getInventoryBehavior();
                 OptionalInt slot = inventoryBehavior.attemptToPutOnHotbarAndGetSlot(i, ignored -> false);
                 if (slot.isPresent()) {
-                    ctx.player().getInventory().selected = slot.getAsInt();
+                    ctx.player().getInventory().setSelectedSlot(slot.getAsInt());
                     return true;
                 }
                 return false;
@@ -641,10 +641,10 @@ public final class CraftProcess extends BaritoneProcessHelper {
     }
 
     private boolean selectHotbarItem(Item item) {
-        NonNullList<ItemStack> items = ctx.player().getInventory().items;
+        NonNullList<ItemStack> items = ctx.player().getInventory().getNonEquipmentItems();
         for (int i = 0; i < 9; i++) {
             if (!items.get(i).isEmpty() && items.get(i).getItem() == item) {
-                ctx.player().getInventory().selected = i;
+                ctx.player().getInventory().setSelectedSlot(i);
                 return true;
             }
         }
@@ -655,7 +655,7 @@ public final class CraftProcess extends BaritoneProcessHelper {
             if (!items.get(i).isEmpty() && items.get(i).getItem() == item) {
                 OptionalInt slot = baritone.getInventoryBehavior().attemptToPutOnHotbarAndGetSlot(i, ignored -> false);
                 if (slot.isPresent()) {
-                    ctx.player().getInventory().selected = slot.getAsInt();
+                    ctx.player().getInventory().setSelectedSlot(slot.getAsInt());
                     return true;
                 }
                 return false;
@@ -783,8 +783,8 @@ public final class CraftProcess extends BaritoneProcessHelper {
 
     private static Map<Item, Integer> snapshotInventory(LocalPlayer player) {
         Map<Item, Integer> inventory = new LinkedHashMap<>();
-        addStacks(inventory, player.getInventory().items);
-        addStacks(inventory, player.getInventory().offhand);
+        addStacks(inventory, player.getInventory().getNonEquipmentItems());
+        addStacks(inventory, java.util.Collections.singletonList(player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.OFFHAND)));
         return inventory;
     }
 

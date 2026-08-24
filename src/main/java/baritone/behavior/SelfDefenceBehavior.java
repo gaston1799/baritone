@@ -211,14 +211,14 @@ public final class SelfDefenceBehavior extends Behavior {
     }
 
     private SelfDefenceHelper.WeaponChoice equipWeapon() {
-        NonNullList<ItemStack> inventory = ctx.player().getInventory().items;
+        NonNullList<ItemStack> inventory = ctx.player().getInventory().getNonEquipmentItems();
         Optional<SelfDefenceHelper.WeaponChoice> choice = SelfDefenceHelper.chooseWeapon(inventory, Baritone.settings().attackType.value);
         if (!choice.isPresent()) {
             return null;
         }
         SelfDefenceHelper.WeaponChoice selected = choice.get();
         if (selected.slot < 9) {
-            ctx.player().getInventory().selected = selected.slot;
+            ctx.player().getInventory().setSelectedSlot(selected.slot);
             ctx.playerController().syncHeldItem();
             return selected;
         }
@@ -226,7 +226,7 @@ public final class SelfDefenceBehavior extends Behavior {
         if (!swappedTo.isPresent()) {
             return null;
         }
-        ctx.player().getInventory().selected = swappedTo.getAsInt();
+        ctx.player().getInventory().setSelectedSlot(swappedTo.getAsInt());
         ctx.playerController().syncHeldItem();
         ItemStack equipped = inventory.get(swappedTo.getAsInt());
         return new SelfDefenceHelper.WeaponChoice(

@@ -750,7 +750,7 @@ public interface MovementHelper extends ActionCosts, Helper {
             return;
         }
         if (Baritone.settings().autoTool.value && !Baritone.settings().assumeExternalAutoTool.value) {
-            ctx.player().getInventory().selected = ts.getBestSlot(b.getBlock(), preferSilkTouch);
+            ctx.player().getInventory().setSelectedSlot(ts.getBestSlot(b.getBlock(), preferSilkTouch));
         }
     }
 

@@ -252,8 +252,8 @@ public class CraftCommand extends Command {
 
     private static Map<Item, Integer> snapshotInventory(LocalPlayer player) {
         Map<Item, Integer> inventory = new LinkedHashMap<>();
-        addStacks(inventory, player.getInventory().items);
-        addStacks(inventory, player.getInventory().offhand);
+        addStacks(inventory, player.getInventory().getNonEquipmentItems());
+        addStacks(inventory, java.util.Collections.singletonList(player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.OFFHAND)));
         return inventory;
     }
 
