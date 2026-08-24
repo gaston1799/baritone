@@ -66,7 +66,10 @@ public class TempPathCommand extends Command {
             tempPathStart = ctx.playerFeet();
         }
         baritone.getCustomGoalProcess().setGoal(new GoalBlock(end));
-        logDirect("Temp path: " + tempPathStart + " -> " + end + " (goal set)");
+        // path() flips the goal process to PATH_REQUESTED so the planner actually
+        // computes a route (setGoal alone only stores the goal, nothing renders)
+        baritone.getCustomGoalProcess().path();
+        logDirect("Temp path: " + tempPathStart + " -> " + end + " (pathing)");
     }
 
     @Override
