@@ -209,6 +209,13 @@ public final class Settings {
     public final Setting<Boolean> selfDefenceStrafe = new Setting<>(true);
 
     /**
+     * Allow smash-diving creepers when the bot has the mace + elytra + firework
+     * escape kit (smash, then rocket straight up before the fuse pops). When
+     * false, creepers are always avoided.
+     */
+    public final Setting<Boolean> selfDefenceCreeperDive = new Setting<>(true);
+
+    /**
      * Allow Baritone to place blocks
      */
     public final Setting<Boolean> allowPlace = new Setting<>(true);

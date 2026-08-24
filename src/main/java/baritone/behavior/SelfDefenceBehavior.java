@@ -67,7 +67,7 @@ public final class SelfDefenceBehavior extends Behavior {
     private boolean strafeOwned;
     private int lastTotemSwapTick = -100;
     private int lastShieldSwapTick = -100;
-    private int maceDivePhase; // 0 idle, 1 launch (jump), 2 glide/swoop, 3 dive (attack window)
+    private int maceDivePhase; // 0 idle, 1 launch (jump), 2 glide/swoop, 3 dive (attack window), 4 rocket escape
     private int maceDiveTick;
 
     public SelfDefenceBehavior(Baritone baritone) {
@@ -206,6 +206,11 @@ public final class SelfDefenceBehavior extends Behavior {
      * ignite it) and walks away; no attacks happen while one is that close.
      */
     private boolean avoidNearbyCreepers() {
+        if (canCreeperDive()) {
+            // we have the smash + rocket-escape kit: let combat proceed and
+            // dive-bomb the creeper instead of walking away
+            return false;
+        }
         double safeDist = Baritone.settings().selfDefenceCreeperSafeDistance.value;
         double safeDistSq = safeDist * safeDist;
         Creeper nearest = null;
@@ -380,6 +385,53 @@ public final class SelfDefenceBehavior extends Behavior {
      * the elytra to gain altitude, then dives and swings at the bottom of the
      * fall. Without elytra it just jump-crits (base mace damage only).
      */
+    /**
+     * True when the bot can safely dive-bomb a creeper: mace smash requested,
+     * elytra equipped and a firework rocket available for the escape boost.
+     */
+    private boolean canCreeperDive() {
+        return Baritone.settings().selfDefenceCreeperDive.value
+                && Baritone.settings().attackType.value == Settings.AttackType.MACE_SMASH
+                && ctx.player() != null
+                && ctx.player().getItemBySlot(EquipmentSlot.CHEST).getItem() == Items.ELYTRA
+                && hasFireworkRocket();
+    }
+
+    private boolean hasFireworkRocket() {
+        NonNullList<ItemStack> invy = ctx.player().getInventory().getNonEquipmentItems();
+        for (ItemStack stack : invy) {
+            if (stack.getItem() == Items.FIREWORK_ROCKET) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Put a firework rocket in the selected hotbar slot (hotbar first, else
+     * swap one in from the inventory).
+     */
+    private void equipFireworkRocket() {
+        for (int i = 0; i < 9; i++) {
+            if (ctx.player().getInventory().getItem(i).getItem() == Items.FIREWORK_ROCKET) {
+                ctx.player().getInventory().setSelectedSlot(i);
+                ctx.playerController().syncHeldItem();
+                return;
+            }
+        }
+        NonNullList<ItemStack> invy = ctx.player().getInventory().getNonEquipmentItems();
+        for (int i = 9; i < invy.size(); i++) {
+            if (invy.get(i).getItem() == Items.FIREWORK_ROCKET) {
+                OptionalInt slot = baritone.getInventoryBehavior().attemptToPutOnHotbarAndGetSlot(i, s -> s == 0);
+                if (slot.isPresent()) {
+                    ctx.player().getInventory().setSelectedSlot(slot.getAsInt());
+                    ctx.playerController().syncHeldItem();
+                }
+                return;
+            }
+        }
+    }
+
     private void handleMaceSmash() {
         boolean hasElytra = ctx.player().getItemBySlot(EquipmentSlot.CHEST).getItem() == Items.ELYTRA;
         switch (maceDivePhase) {
@@ -433,7 +485,14 @@ public final class SelfDefenceBehavior extends Behavior {
                         && SelfDefenceHelper.withinMeleeReach(ctx.playerHead(), currentTarget)
                         && weaponReady()) {
                     attemptAttack(currentTarget, true, Settings.AttackType.MACE_SMASH, true);
-                    resetMaceDive();
+                    if (hasFireworkRocket()) {
+                        // smash -> rocket straight up -> re-dive. The boost also
+                        // escapes a creeper's blast radius before its fuse pops.
+                        maceDivePhase = 4;
+                        maceDiveTick = tickCounter;
+                    } else {
+                        resetMaceDive();
+                    }
                     return;
                 }
                 // crater guard: missed the swing and falling too far - glide it out
@@ -450,6 +509,31 @@ public final class SelfDefenceBehavior extends Behavior {
                     resetMaceDive();
                 }
                 return;
+            case 4: // rocket escape - boost up, then swoop and dive again
+                if (ctx.player().onGround()) {
+                    resetMaceDive();
+                    return;
+                }
+                if (!ctx.player().isFallFlying()) {
+                    // re-deploy the elytra (we cut it for the dive)
+                    if (!jumpInputOwned) {
+                        jumpInputOwned = true;
+                        baritone.getInputOverrideHandler().setInputForceState(Input.JUMP, true);
+                    }
+                    return;
+                }
+                if (jumpInputOwned) {
+                    releaseJumpInput(); // gliding - stop trying to deploy
+                }
+                equipFireworkRocket();
+                baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true); // boost
+                if (tickCounter - maceDiveTick > 10 || ctx.player().getDeltaMovement().y > 0.5D) {
+                    // gained enough height - cut everything and re-dive
+                    baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, false);
+                    maceDivePhase = 2; // swoop -> dive again
+                    maceDiveTick = tickCounter;
+                }
+                return;
             default:
                 resetMaceDive();
         }
@@ -459,6 +543,7 @@ public final class SelfDefenceBehavior extends Behavior {
         maceDivePhase = 0;
         jumpAttackQueued = false;
         releaseJumpInput();
+        baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, false);
     }
 
     private void handleJumpCrit() {
@@ -694,6 +779,7 @@ public final class SelfDefenceBehavior extends Behavior {
 
     private void resetJumpState() {
         jumpAttackQueued = false;
+        maceDivePhase = 0;
         releaseJumpInput();
     }
 
