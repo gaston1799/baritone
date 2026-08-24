@@ -128,9 +128,10 @@ public final class InventoryBehavior extends Behavior implements Helper {
     }
 
     private boolean autoEat() {
-        // Self-defence takes priority: don't fight over the hotbar slot or hold
-        // the use key while baritone is actively defending a threat.
-        if (!Baritone.settings().autoEat.value || baritone.getSelfDefenceBehavior().isDefending()) {
+        // Self-defence takes priority, except for critical survival items: a
+        // golden apple at low health is still eaten while defending.
+        boolean defending = baritone.getSelfDefenceBehavior().isDefending();
+        if (!Baritone.settings().autoEat.value || (defending && !emergencyGoldenAppleAvailable())) {
             stopAutoEatUse();
             return false;
         }
@@ -166,6 +167,33 @@ public final class InventoryBehavior extends Behavior implements Helper {
 
     public boolean isAutoEating() {
         return autoEatHoldingUse || (ctx.player() != null && MovementHelper.isConsumingItem(ctx));
+    }
+
+    /**
+     * Golden apples are critical survival items: if we're below
+     * autoEatGoldenAppleHealth and carry one, keep eating it even while
+     * self-defence is active.
+     */
+    private boolean emergencyGoldenAppleAvailable() {
+        LocalPlayer player = ctx.player();
+        if (player == null || player.getHealth() >= Baritone.settings().autoEatGoldenAppleHealth.value) {
+            return false;
+        }
+        for (ItemStack stack : player.getInventory().getNonEquipmentItems()) {
+            if (stack.getItem() == Items.GOLDEN_APPLE || stack.getItem() == Items.ENCHANTED_GOLDEN_APPLE) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean isEatingGoldenApple() {
+        LocalPlayer player = ctx.player();
+        if (player == null || !player.isUsingItem()) {
+            return false;
+        }
+        ItemStack held = player.getMainHandItem();
+        return held.getItem() == Items.GOLDEN_APPLE || held.getItem() == Items.ENCHANTED_GOLDEN_APPLE;
     }
 
     private boolean autoTotem() {

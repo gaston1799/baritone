@@ -100,6 +100,12 @@ public final class SelfDefenceBehavior extends Behavior {
         Rotation look = SelfDefenceHelper.rotationToTarget(ctx.playerHead(), ctx.playerRotations(), currentTarget);
         baritone.getLookBehavior().updateTarget(look, false);
 
+        // A golden apple being eaten is critical survival: finish the eat
+        // before engaging (attacking would cancel it).
+        if (baritone.getInventoryBehavior().isEatingGoldenApple()) {
+            return;
+        }
+
         SelfDefenceHelper.WeaponChoice weapon = equipWeapon();
         if (weapon == null) {
             resetJumpState();
