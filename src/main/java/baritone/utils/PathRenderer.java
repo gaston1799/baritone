@@ -460,6 +460,8 @@ public final class PathRenderer implements IRenderer {
         IRenderer.startLines(new Color(0, 255, 200), 0.6F, settings.pathRenderLineWidthPixels.value, settings.renderSelectionBoxesIgnoreDepth.value);
         double px = pos.x, py = pos.y, pz = pos.z;
         double startY = pos.y;
+        double landX = px, landY = py, landZ = pz;
+        boolean landed = false;
         for (int i = 0; i < 24; i++) {
             double nx = px + vx;
             double ny = py + vy;
@@ -472,10 +474,22 @@ public final class PathRenderer implements IRenderer {
             vx *= 0.91D;
             vz *= 0.91D;
             if (py < startY - 0.5D) {
+                landed = true;
+                landX = px;
+                landY = py;
+                landZ = pz;
                 break;
             }
         }
         IRenderer.endLines(settings.renderSelectionBoxesIgnoreDepth.value);
+        if (landed) {
+            int bx = Mth.floor(landX);
+            int by = Mth.floor(landY);
+            int bz = Mth.floor(landZ);
+            IRenderer.startLines(new Color(255, 255, 255), 0.8F, settings.pathRenderLineWidthPixels.value, settings.renderSelectionBoxesIgnoreDepth.value);
+            IRenderer.emitAABB(stack, new AABB(bx, by, bz, bx + 1, by + 1, bz + 1));
+            IRenderer.endLines(settings.renderSelectionBoxesIgnoreDepth.value);
+        }
     }
 
     private static void drawDankLitGoalBox(PoseStack stack, Color color, double minX, double maxX, double minZ, double maxZ, double minY, double maxY, double y1, double y2, boolean setupRender) {

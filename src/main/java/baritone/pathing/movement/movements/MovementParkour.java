@@ -146,6 +146,10 @@ public class MovementParkour extends Movement implements ParkourDebuggable {
             maxJump = 3;
         }
         maxJump = Math.max(maxJump, iceMomentumMaxJump(context, standingOn));
+        // Dynamic parkour: with speed / jump-boost effects the player can clear longer
+        // gaps. predictedJumpDistance is calibrated so plain sprint ≈ 4 blocks.
+        double predictedJump = MovementHelper.predictedJumpDistance(context.getBaritone().getPlayerContext());
+        maxJump = Math.max(maxJump, (int) Math.round(predictedJump * 2.05D));
 
         // check parkour jumps from smallest to largest for obstacles/walls and landing positions
         int verifiedMaxJump = 1; // i - 1 (when i = 2)
