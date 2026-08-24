@@ -165,16 +165,39 @@ public final class MinecraftRecipeCatalog implements CraftingPlanner.RecipeLooku
     private static MinecraftRecipeCatalog createFromRecipeManager(RecipeManager recipeManager, RegistryAccess registryAccess) {
         Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult = new LinkedHashMap<>();
         for (RecipeHolder<?> holder : recipeManager.getRecipes()) {
-            net.minecraft.world.item.crafting.Recipe<?> value = holder.value();
-            if (value.getType() == net.minecraft.world.item.crafting.RecipeType.CRAFTING) {
-                net.minecraft.world.item.crafting.CraftingRecipe recipe = (net.minecraft.world.item.crafting.CraftingRecipe) value;
-                ItemStack result = recipe.assemble(net.minecraft.world.item.crafting.CraftingInput.EMPTY, registryAccess);
-                if (result.isEmpty()) {
+            try {
+                addManagerRecipe(byResult, holder, registryAccess);
+            } catch (RuntimeException e) {
+                // a single broken/special recipe must not kill the whole catalog
+                // (some special recipes throw when assembled with an empty input)
+            }
+        }
+        sortRecipes(byResult);
+        return new MinecraftRecipeCatalog(byResult);
+    }
+
+    private static void addManagerRecipe(Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult, RecipeHolder<?> holder, RegistryAccess registryAccess) {
+        net.minecraft.world.item.crafting.Recipe<?> value = holder.value();
+        if (value.getType() == net.minecraft.world.item.crafting.RecipeType.CRAFTING) {
+            net.minecraft.world.item.crafting.CraftingRecipe recipe = (net.minecraft.world.item.crafting.CraftingRecipe) value;
+            // 1.21.5 has no getResultItem: results are exposed through the display
+            // system. Using display() also avoids assembling with an empty input,
+            // which special recipes (repair, banner, firework...) cannot do.
+            CraftingPlanner.StationKind station = recipe.placementInfo().ingredients().size() <= 4
+                    ? CraftingPlanner.StationKind.HAND_CRAFTING
+                    : CraftingPlanner.StationKind.CRAFTING_TABLE;
+            for (RecipeDisplay display : recipe.display()) {
+                ItemStack result;
+                if (display instanceof ShapedCraftingRecipeDisplay shaped) {
+                    result = resolveSlot(shaped.result());
+                } else if (display instanceof ShapelessCraftingRecipeDisplay shapeless) {
+                    result = resolveSlot(shapeless.result());
+                } else {
                     continue;
                 }
-                CraftingPlanner.StationKind station = recipe.placementInfo().ingredients().size() <= 4
-                        ? CraftingPlanner.StationKind.HAND_CRAFTING
-                        : CraftingPlanner.StationKind.CRAFTING_TABLE;
+                if (result == null || result.isEmpty()) {
+                    continue;
+                }
                 addRecipe(byResult, new CraftingPlanner.NormalizedRecipe(
                         holder.id().location(),
                         station,
@@ -183,21 +206,14 @@ public final class MinecraftRecipeCatalog implements CraftingPlanner.RecipeLooku
                         flattenIngredients(recipe.placementInfo().ingredients()),
                         false
                 ));
-            } else if (value instanceof net.minecraft.world.item.crafting.AbstractCookingRecipe cooking) {
-                CraftingPlanner.StationKind station;
-                if (value.getType() == net.minecraft.world.item.crafting.RecipeType.SMELTING) {
-                    station = CraftingPlanner.StationKind.FURNACE;
-                } else if (value.getType() == net.minecraft.world.item.crafting.RecipeType.BLASTING) {
-                    station = CraftingPlanner.StationKind.BLAST_FURNACE;
-                } else if (value.getType() == net.minecraft.world.item.crafting.RecipeType.SMOKING) {
-                    station = CraftingPlanner.StationKind.SMOKER;
-                } else if (value.getType() == net.minecraft.world.item.crafting.RecipeType.CAMPFIRE_COOKING) {
-                    station = CraftingPlanner.StationKind.CAMPFIRE;
-                } else {
+            }
+        } else if (value instanceof net.minecraft.world.item.crafting.AbstractCookingRecipe cooking) {
+            for (RecipeDisplay display : cooking.display()) {
+                if (!(display instanceof FurnaceRecipeDisplay furnace)) {
                     continue;
                 }
-                ItemStack result = cooking.assemble(new net.minecraft.world.item.crafting.SingleRecipeInput(ItemStack.EMPTY), registryAccess);
-                if (result.isEmpty()) {
+                ItemStack result = resolveSlot(furnace.result());
+                if (result == null || result.isEmpty()) {
                     continue;
                 }
                 List<CraftingPlanner.IngredientChoice> ingredients = flattenIngredients(cooking.placementInfo().ingredients());
@@ -206,7 +222,7 @@ public final class MinecraftRecipeCatalog implements CraftingPlanner.RecipeLooku
                 }
                 addRecipe(byResult, new CraftingPlanner.NormalizedRecipe(
                         holder.id().location(),
-                        station,
+                        stationFromStationDisplay(furnace.craftingStation()),
                         result.getItem(),
                         result.getCount(),
                         ingredients,
@@ -214,8 +230,6 @@ public final class MinecraftRecipeCatalog implements CraftingPlanner.RecipeLooku
                 ));
             }
         }
-        sortRecipes(byResult);
-        return new MinecraftRecipeCatalog(byResult);
     }
 
     private static void sortRecipes(Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult) {
