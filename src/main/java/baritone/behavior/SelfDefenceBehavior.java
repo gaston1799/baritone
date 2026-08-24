@@ -67,6 +67,8 @@ public final class SelfDefenceBehavior extends Behavior {
     private boolean strafeOwned;
     private int lastTotemSwapTick = -100;
     private int lastShieldSwapTick = -100;
+    private int maceDivePhase; // 0 idle, 1 launch (jump), 2 glide/swoop, 3 dive (attack window)
+    private int maceDiveTick;
 
     public SelfDefenceBehavior(Baritone baritone) {
         super(baritone);
@@ -139,7 +141,11 @@ public final class SelfDefenceBehavior extends Behavior {
         handleTotemHotswap();
         if (SelfDefenceHelper.withinMeleeReach(ctx.playerHead(), currentTarget)) {
             handleShield();
-            handleStrafe();
+            if (attackType != Settings.AttackType.MACE_SMASH) {
+                handleStrafe();
+            } else {
+                releaseStrafe(); // sideways drift would wreck the dive line
+            }
         } else {
             releaseCombatInputs();
         }
@@ -368,7 +374,98 @@ public final class SelfDefenceBehavior extends Behavior {
         releaseStrafe();
     }
 
+    /**
+     * Mace + elytra dive-bomb. The mace's smash attack needs &gt;1.5 blocks of fall
+     * for bonus damage (no cap); a plain jump only gives ~1.25, so the bot uses
+     * the elytra to gain altitude, then dives and swings at the bottom of the
+     * fall. Without elytra it just jump-crits (base mace damage only).
+     */
+    private void handleMaceSmash() {
+        boolean hasElytra = ctx.player().getItemBySlot(EquipmentSlot.CHEST).getItem() == Items.ELYTRA;
+        switch (maceDivePhase) {
+            case 0: // idle - start the dive from the ground
+                if (!ctx.player().onGround()) {
+                    return;
+                }
+                if (!weaponReady()) {
+                    kiteIfNeeded();
+                    resetJumpState();
+                    return;
+                }
+                maceDivePhase = 1;
+                maceDiveTick = tickCounter;
+                jumpAttackQueued = true;
+                jumpInputOwned = true;
+                baritone.getInputOverrideHandler().setInputForceState(Input.JUMP, true);
+                return;
+            case 1: // launch - leave the ground, deploy elytra
+                if (ctx.player().onGround()) {
+                    resetMaceDive(); // didn't get airborne (head bonk) - try again next tick
+                    return;
+                }
+                if (hasElytra && tickCounter - maceDiveTick > 4) {
+                    maceDivePhase = 2; // keep holding jump - elytra will deploy and we swoop
+                    maceDiveTick = tickCounter;
+                } else if (!hasElytra && tickCounter - maceDiveTick > 2) {
+                    releaseJumpInput(); // no elytra: just fall, attack once past 1.5
+                    maceDivePhase = 3;
+                    maceDiveTick = tickCounter;
+                }
+                return;
+            case 2: // glide - gain a bit of altitude, then cut the elytra and dive
+                if (hasElytra) {
+                    // keep gliding (jump held) for a short swoop, then nose down
+                    if (tickCounter - maceDiveTick > 12) {
+                        releaseJumpInput(); // cut elytra -> start falling
+                        maceDivePhase = 3;
+                        maceDiveTick = tickCounter;
+                    }
+                } else {
+                    maceDivePhase = 3;
+                }
+                return;
+            case 3: // dive - swing at the bottom of the fall
+                if (!ctx.player().onGround()
+                        && ctx.player().fallDistance > 1.5F
+                        && ctx.player().getDeltaMovement().y < 0.0D
+                        && !ctx.player().isInWater()
+                        && !ctx.player().onClimbable()
+                        && SelfDefenceHelper.withinMeleeReach(ctx.playerHead(), currentTarget)
+                        && weaponReady()) {
+                    attemptAttack(currentTarget, true, Settings.AttackType.MACE_SMASH, true);
+                    resetMaceDive();
+                    return;
+                }
+                // crater guard: missed the swing and falling too far - glide it out
+                if (hasElytra && !ctx.player().onGround() && ctx.player().fallDistance > 10.0F) {
+                    if (!jumpInputOwned) {
+                        jumpInputOwned = true;
+                        baritone.getInputOverrideHandler().setInputForceState(Input.JUMP, true);
+                    }
+                    maceDivePhase = 2;
+                    maceDiveTick = tickCounter;
+                    return;
+                }
+                if (ctx.player().onGround()) {
+                    resetMaceDive();
+                }
+                return;
+            default:
+                resetMaceDive();
+        }
+    }
+
+    private void resetMaceDive() {
+        maceDivePhase = 0;
+        jumpAttackQueued = false;
+        releaseJumpInput();
+    }
+
     private void handleJumpCrit() {
+        if (currentAttackType == Settings.AttackType.MACE_SMASH) {
+            handleMaceSmash();
+            return;
+        }
         if (ctx.player().onGround()) {
             if (!weaponReady()) {
                 kiteIfNeeded();

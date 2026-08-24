@@ -61,7 +61,8 @@ public final class Settings {
     public enum AttackType {
         SWORD_SWEEP("swordSweep"),
         SWORD_JUMP("swordJump"),
-        AXE_JUMP("axeJump");
+        AXE_JUMP("axeJump"),
+        MACE_SMASH("maceSmash");
 
         private final String serializedName;
 

@@ -33,6 +33,7 @@ import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.item.AxeItem;
+import net.minecraft.world.item.MaceItem;
 import net.minecraft.world.item.component.Tool;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -80,7 +81,12 @@ public final class SelfDefenceHelper {
         if (preferred.isPresent()) {
             return preferred;
         }
-        return strongest(candidates, preferredFamily == WeaponFamily.AXE ? WeaponFamily.SWORD : WeaponFamily.AXE);
+        // fallback when the preferred family is unavailable: sword is the best
+        // general fallback for jump attacks, axe for everything else
+        if (preferredFamily == WeaponFamily.SWORD) {
+            return strongest(candidates, WeaponFamily.AXE);
+        }
+        return strongest(candidates, WeaponFamily.SWORD);
     }
 
     private static Optional<WeaponChoice> strongest(List<WeaponChoice> candidates, WeaponFamily family) {
@@ -128,6 +134,9 @@ public final class SelfDefenceHelper {
         if (requestedType == Settings.AttackType.AXE_JUMP && choice.family == WeaponFamily.SWORD) {
             return Settings.AttackType.SWORD_JUMP;
         }
+        if (requestedType == Settings.AttackType.MACE_SMASH && choice.family != WeaponFamily.MACE) {
+            return Settings.AttackType.SWORD_JUMP; // no mace equipped - jump crit with whatever we have
+        }
         return requestedType;
     }
 
@@ -156,7 +165,14 @@ public final class SelfDefenceHelper {
     }
 
     static WeaponFamily preferredFamily(Settings.AttackType requestedType) {
-        return requestedType == Settings.AttackType.AXE_JUMP ? WeaponFamily.AXE : WeaponFamily.SWORD;
+        switch (requestedType) {
+            case AXE_JUMP:
+                return WeaponFamily.AXE;
+            case MACE_SMASH:
+                return WeaponFamily.MACE;
+            default:
+                return WeaponFamily.SWORD;
+        }
     }
 
     public static WeaponFamily classifyWeapon(ItemStack stack) {
@@ -166,6 +182,9 @@ public final class SelfDefenceHelper {
         Item item = stack.getItem();
         if (item.builtInRegistryHolder().is(net.minecraft.tags.ItemTags.SWORDS)) {
             return WeaponFamily.SWORD;
+        }
+        if (item instanceof MaceItem) {
+            return WeaponFamily.MACE;
         }
         if (item instanceof AxeItem) {
             return WeaponFamily.AXE;
@@ -218,7 +237,8 @@ public final class SelfDefenceHelper {
 
     public enum WeaponFamily {
         SWORD,
-        AXE
+        AXE,
+        MACE
     }
 
     public static final class WeaponChoice {
