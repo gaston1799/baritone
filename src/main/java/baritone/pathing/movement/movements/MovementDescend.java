@@ -23,6 +23,7 @@ import baritone.api.pathing.movement.MovementStatus;
 import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.RotationUtils;
 import baritone.api.utils.VecUtils;
+import baritone.utils.CorrectionLogger;
 import baritone.api.utils.input.Input;
 import baritone.pathing.movement.CalculationContext;
 import baritone.pathing.movement.Movement;
@@ -258,10 +259,20 @@ public class MovementDescend extends Movement {
         state.setInput(Input.SNEAK, Baritone.settings().allowWalkOnMagmaBlocks.value && ctx.world().getBlockState(ctx.player().blockPosition().below()).is(Blocks.MAGMA_BLOCK));
 
         if (!playerFeet.equals(dest) || ab > 0.25) {
+            // Fast-fall overshoot: if the player has flown past the dest and is
+            // back on solid ground, accept the overshoot as complete instead of
+            // walking backward - the next movement picks up from here.
+            boolean pastDest = ab < fromStart;
+            if (pastDest && ctx.player().onGround() && ctx.player().getDeltaMovement().y > -0.5D) {
+                CorrectionLogger.log("descend accept-overshoot: player " + ctx.playerFeet() + " past dest "
+                        + dest + " (src " + src + "), continuing path");
+                return state.setStatus(MovementStatus.SUCCESS);
+            }
             // when falling fast, don't try to walk backwards to "correct" an
             // overshoot mid-air - that causes the backward flicker; let the
             // fall carry us and re-sync on the ground instead
             if (playerFeet.equals(dest) && ctx.player().getDeltaMovement().y > -0.2D && MovementHelper.moveBackIfOvershot(ctx, state, src, dest, 0.25D)) {
+                CorrectionLogger.log("descend move-back: overshot dest " + dest + " on the ground, nudging back (ab=" + ab + ")");
                 return state;
             }
             if (numTicks++ < 20 && fromStart < 1.25) {

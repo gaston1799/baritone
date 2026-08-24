@@ -115,15 +115,28 @@ public class PathExecutor implements IPathExecutor, Helper {
         BetterBlockPos whereAmI = ctx.playerFeet();
         boolean deferMidairReconciliation = shouldDeferMidairReconciliation(movement);
         if (!deferMidairReconciliation && !movement.getValidPositions().contains(whereAmI)) {
-            for (int i = 0; i < pathPosition && i < path.length(); i++) {//this happens for example when you lag out and get teleported back a couple blocks
-                if (((Movement) path.movements().get(i)).getValidPositions().contains(whereAmI)) {
-                    int previousPos = pathPosition;
-                    pathPosition = i;
-                    for (int j = pathPosition; j <= previousPos; j++) {
-                        path.movements().get(j).reset();
+            // Fast-fall overshoot guard: when the player has already passed the
+            // current movement's dest (e.g. fell past it at speed), don't rewind
+            // to an earlier movement - that's the backward flicker. Let the
+            // skip-forward scan take over instead.
+            boolean passedDest = VecUtils.entityFlatDistanceToCenter(ctx.player(), movement.getDest())
+                    < VecUtils.entityFlatDistanceToCenter(ctx.player(), movement.getSrc());
+            if (passedDest) {
+                baritone.utils.CorrectionLogger.log("skip-rewind: player " + whereAmI + " is past dest of movement " + pathPosition
+                        + " (" + movement.getSrc() + "->" + movement.getDest() + "), fast-fall overshoot");
+            } else {
+                for (int i = 0; i < pathPosition && i < path.length(); i++) {//this happens for example when you lag out and get teleported back a couple blocks
+                    if (((Movement) path.movements().get(i)).getValidPositions().contains(whereAmI)) {
+                        int previousPos = pathPosition;
+                        pathPosition = i;
+                        for (int j = pathPosition; j <= previousPos; j++) {
+                            path.movements().get(j).reset();
+                        }
+                        onChangeInPathPosition();
+                        baritone.utils.CorrectionLogger.log("rewind: pathPos " + previousPos + "->" + i
+                                + " player=" + whereAmI + " (feet not in current movement valid positions)");
+                        return false;
                     }
-                    onChangeInPathPosition();
-                    return false;
                 }
             }
             for (int i = pathPosition + 3; i < path.length() - 1; i++) { //dont check pathPosition+1. the movement tells us when it's done (e.g. sneak placing)
@@ -133,6 +146,8 @@ public class PathExecutor implements IPathExecutor, Helper {
                         logDebug("Skipping forward " + (i - pathPosition) + " steps, to " + i);
                     }
                     //System.out.println("Double skip sundae");
+                    baritone.utils.CorrectionLogger.log("skip-forward: pathPos " + pathPosition + "->" + (i - 1)
+                            + " player=" + whereAmI + " (feet matched movement " + i + ")");
                     pathPosition = i - 1;
                     onChangeInPathPosition();
                     return false;
@@ -409,6 +424,7 @@ public class PathExecutor implements IPathExecutor, Helper {
         if (index == -1) {
             return false;
         }
+        baritone.utils.CorrectionLogger.log("snapsnap: pathPos " + pathPosition + "->" + index + " player=" + ctx.playerFeet() + " (feet matched a path position)");
         pathPosition = index; // jump directly to current position
         clearKeys();
         return true;
@@ -431,7 +447,15 @@ public class PathExecutor implements IPathExecutor, Helper {
         if (current instanceof MovementTraverse && pathPosition < path.length() - 3) {
             IMovement next = path.movements().get(pathPosition + 1);
             if (next instanceof MovementAscend && sprintableAscend(ctx, (MovementTraverse) current, (MovementAscend) next, path.movements().get(pathPosition + 2))) {
-                if (skipNow(ctx, current)) {
+                // Only skip the traverse into a sprint ascend if a jump from the
+                // current position would actually clear the step. Otherwise we'd
+                // jump way too early (arc lands short of the obstacle and the bot
+                // gets stuck against the 1-block wall).
+                boolean takeoffReady = MovementHelper.jumpClearsAscend(ctx, next.getSrc(), next.getDest());
+                if (!takeoffReady) {
+                    sprintStateReason = "waiting for ascend takeoff point";
+                }
+                if (skipNow(ctx, current) && takeoffReady) {
                     logDebug("Skipping traverse to straight ascend");
                     pathPosition++;
                     onChangeInPathPosition();

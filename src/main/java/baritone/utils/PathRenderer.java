@@ -483,7 +483,7 @@ public final class PathRenderer implements IRenderer {
             // only consider landing while descending, and only on solid ground
             if (vy < 0.0D && py <= pos.y) {
                 int bx = Mth.floor(px);
-                int by = Mth.floor(py) - 1;
+                int by = Mth.floor(py);
                 int bz = Mth.floor(pz);
                 if (MovementHelper.canWalkOn(ctx, new BetterBlockPos(bx, by, bz))) {
                     landed = true;
@@ -498,12 +498,12 @@ public final class PathRenderer implements IRenderer {
         if (landed) {
             // white marker on the solid block the arc lands on
             IRenderer.startLines(new Color(255, 255, 255), 0.8F, settings.pathRenderLineWidthPixels.value, true);
-            IRenderer.emitAABB(stack, new AABB(Mth.floor(landX), Mth.floor(landY) - 1, Mth.floor(landZ), Mth.floor(landX) + 1, Mth.floor(landY), Mth.floor(landZ) + 1));
+            IRenderer.emitAABB(stack, new AABB(Mth.floor(landX), Mth.floor(landY), Mth.floor(landZ), Mth.floor(landX) + 1, Mth.floor(landY) + 1, Mth.floor(landZ) + 1));
             IRenderer.endLines(true);
         } else {
             // no solid ground under the landing point - mark it red so it's obvious
             IRenderer.startLines(new Color(255, 60, 60), 0.8F, settings.pathRenderLineWidthPixels.value, true);
-            IRenderer.emitAABB(stack, new AABB(Mth.floor(px), Mth.floor(py) - 1, Mth.floor(pz), Mth.floor(px) + 1, Mth.floor(py), Mth.floor(pz) + 1));
+            IRenderer.emitAABB(stack, new AABB(Mth.floor(px), Mth.floor(py), Mth.floor(pz), Mth.floor(px) + 1, Mth.floor(py) + 1, Mth.floor(pz) + 1));
             IRenderer.endLines(true);
         }
     }
