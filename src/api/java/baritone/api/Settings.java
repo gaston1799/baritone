@@ -1041,6 +1041,12 @@ public final class Settings {
     public final Setting<Boolean> pathThroughCachedOnly = new Setting<>(false);
 
     /**
+     * Render the predicted jump/parkour arc from the player's current position and
+     * velocity (jump power and speed effects included) while pathing.
+     */
+    public final Setting<Boolean> renderJumpArc = new Setting<>(true);
+
+    /**
      * Continue sprinting while in water
      */
     public final Setting<Boolean> sprintInWater = new Setting<>(true);

@@ -66,6 +66,7 @@ public final class DefaultCommands {
                 new ClickCommand(baritone),
                 new SurfaceCommand(baritone),
                 new ThisWayCommand(baritone),
+                new TempPathCommand(baritone),
                 new BridgeCommand(baritone),
                 new WaypointsCommand(baritone),
                 new CommandAlias(baritone, "sethome", "Sets your home waypoint", "waypoints save home"),

@@ -33,6 +33,7 @@ import baritone.api.utils.IPlayerContext;
 import baritone.api.utils.VecUtils;
 import baritone.api.utils.interfaces.IGoalRenderPos;
 import baritone.behavior.PathingBehavior;
+import baritone.command.defaults.TempPathCommand;
 import baritone.pathing.movement.movements.AscendDebugInfo;
 import baritone.pathing.movement.movements.AscendDebugTrace;
 import baritone.pathing.movement.movements.ParkourDebugInfo;
@@ -98,6 +99,11 @@ public final class PathRenderer implements IRenderer {
 
         if (goal != null && settings.renderGoal.value) {
             drawGoal(event.getModelViewStack(), ctx, goal, partialTicks, settings.colorGoalBox.value);
+        }
+
+        renderTempPath(event.getModelViewStack(), ctx);
+        if (settings.renderJumpArc.value) {
+            renderJumpArc(event.getModelViewStack(), ctx);
         }
 
         PathExecutor current = behavior.getCurrent();
@@ -419,6 +425,57 @@ public final class PathRenderer implements IRenderer {
             y2 = 1 - y + goalYLevel.level - renderPosY;
             drawDankLitGoalBox(stack, color, minX, maxX, minZ, maxZ, minY, maxY, y1, y2, setupRender);
         }
+    }
+
+    private static void renderTempPath(PoseStack stack, IPlayerContext ctx) {
+        BetterBlockPos start = TempPathCommand.tempPathStart;
+        BetterBlockPos end = TempPathCommand.tempPathEnd;
+        if (start == null || end == null) {
+            return;
+        }
+        IRenderer.startLines(new Color(255, 220, 0), 0.6F, settings.pathRenderLineWidthPixels.value, settings.renderSelectionBoxesIgnoreDepth.value);
+        IRenderer.emitLine(stack,
+                start.getX() + 0.5D, start.getY() + 1.0D, start.getZ() + 0.5D,
+                end.getX() + 0.5D, end.getY() + 1.0D, end.getZ() + 0.5D);
+        IRenderer.endLines(settings.renderSelectionBoxesIgnoreDepth.value);
+    }
+
+    private static void renderJumpArc(PoseStack stack, IPlayerContext ctx) {
+        if (ctx.player() == null) {
+            return;
+        }
+        Vec3 pos = ctx.player().position();
+        Vec3 vel = ctx.player().getDeltaMovement();
+        double jumpPower = baritone.pathing.movement.MovementHelper.playerJumpPower(ctx);
+        double vx = vel.x;
+        double vy = ctx.player().onGround() ? jumpPower : vel.y;
+        double vz = vel.z;
+        double speed = Math.sqrt(vx * vx + vz * vz);
+        if (speed < 0.1D) {
+            // barely moving: use a nominal forward speed so the arc still shows
+            double yaw = Math.toRadians(ctx.player().getYRot());
+            vx = -Math.sin(yaw) * 0.25D;
+            vz = Math.cos(yaw) * 0.25D;
+        }
+        IRenderer.startLines(new Color(0, 255, 200), 0.6F, settings.pathRenderLineWidthPixels.value, settings.renderSelectionBoxesIgnoreDepth.value);
+        double px = pos.x, py = pos.y, pz = pos.z;
+        double startY = pos.y;
+        for (int i = 0; i < 24; i++) {
+            double nx = px + vx;
+            double ny = py + vy;
+            double nz = pz + vz;
+            IRenderer.emitLine(stack, px, py, pz, nx, ny, nz);
+            px = nx;
+            py = ny;
+            pz = nz;
+            vy -= 0.08D;
+            vx *= 0.91D;
+            vz *= 0.91D;
+            if (py < startY - 0.5D) {
+                break;
+            }
+        }
+        IRenderer.endLines(settings.renderSelectionBoxesIgnoreDepth.value);
     }
 
     private static void drawDankLitGoalBox(PoseStack stack, Color color, double minX, double maxX, double minZ, double maxZ, double minY, double maxY, double y1, double y2, boolean setupRender) {
