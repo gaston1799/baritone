@@ -30,6 +30,7 @@ import baritone.utils.combat.SelfDefenceHelper;
 import net.minecraft.core.NonNullList;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
@@ -73,6 +74,9 @@ public final class SelfDefenceBehavior extends Behavior {
             lastKnownHealth = ctx.player().getHealth();
         }
         updateThreatMemory();
+        if (Baritone.settings().selfDefenceAvoidCreepers.value && avoidNearbyCreepers()) {
+            return;
+        }
         Mob nextTarget = selectTarget();
         if (nextTarget == null) {
             clearCombatState();
@@ -162,6 +166,37 @@ public final class SelfDefenceBehavior extends Behavior {
 
     public Mob getCurrentTarget() {
         return currentTarget;
+    }
+
+    /**
+     * Back away from any creeper inside selfDefenceCreeperSafeDistance, even if it
+     * isn't the current target. Faces away from the creeper (looking at it would
+     * ignite it) and walks away; no attacks happen while one is that close.
+     */
+    private boolean avoidNearbyCreepers() {
+        double safeDist = Baritone.settings().selfDefenceCreeperSafeDistance.value;
+        double safeDistSq = safeDist * safeDist;
+        Creeper nearest = null;
+        double nearestDistSq = Double.MAX_VALUE;
+        Vec3 head = ctx.playerHead();
+        for (Entity entity : ctx.entitiesStream().toList()) {
+            if (entity instanceof Creeper creeper && creeper.isAlive()) {
+                double distSq = head.distanceToSqr(creeper.getEyePosition());
+                if (distSq < safeDistSq && distSq < nearestDistSq) {
+                    nearestDistSq = distSq;
+                    nearest = creeper;
+                }
+            }
+        }
+        if (nearest == null) {
+            return false;
+        }
+        Vec3 away = head.subtract(nearest.getEyePosition()).normalize();
+        float awayYaw = (float) Math.toDegrees(Math.atan2(-away.x, -away.z));
+        baritone.getLookBehavior().updateTarget(new Rotation(awayYaw, ctx.playerRotations().getPitch()), false);
+        baritone.getInputOverrideHandler().setInputForceState(Input.MOVE_FORWARD, true);
+        resetJumpState();
+        return true;
     }
 
     private boolean needsChase() {

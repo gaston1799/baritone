@@ -175,6 +175,19 @@ public final class Settings {
     public final Setting<Double> selfDefenceKiteDistance = new Setting<>(2.5D);
 
     /**
+     * Back away from creepers even when they aren't the current target.
+     * Baritone walks away from any creeper inside selfDefenceCreeperSafeDistance
+     * and won't attack while one is that close (attacking/igniting a nearby
+     * creeper tends to end badly).
+     */
+    public final Setting<Boolean> selfDefenceAvoidCreepers = new Setting<>(true);
+
+    /**
+     * How far away from creepers Baritone tries to stay.
+     */
+    public final Setting<Double> selfDefenceCreeperSafeDistance = new Setting<>(3.0D);
+
+    /**
      * Allow Baritone to place blocks
      */
     public final Setting<Boolean> allowPlace = new Setting<>(true);
