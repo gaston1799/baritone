@@ -128,7 +128,9 @@ public final class InventoryBehavior extends Behavior implements Helper {
     }
 
     private boolean autoEat() {
-        if (!Baritone.settings().autoEat.value) {
+        // Self-defence takes priority: don't fight over the hotbar slot or hold
+        // the use key while baritone is actively defending a threat.
+        if (!Baritone.settings().autoEat.value || baritone.getSelfDefenceBehavior().isDefending()) {
             stopAutoEatUse();
             return false;
         }
