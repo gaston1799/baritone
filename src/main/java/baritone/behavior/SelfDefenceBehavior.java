@@ -66,6 +66,7 @@ public final class SelfDefenceBehavior extends Behavior {
     private boolean shieldOwned;
     private boolean strafeOwned;
     private int lastTotemSwapTick = -100;
+    private int lastShieldSwapTick = -100;
 
     public SelfDefenceBehavior(Baritone baritone) {
         super(baritone);
@@ -280,6 +281,7 @@ public final class SelfDefenceBehavior extends Behavior {
      * blocks and never interrupts the swing.
      */
     private void handleShield() {
+        equipShieldToOffhand();
         boolean wantShield = Baritone.settings().selfDefenceUseShield.value
                 && ctx.player().getItemBySlot(EquipmentSlot.OFFHAND).getItem() == Items.SHIELD
                 && !weaponReady()
@@ -290,6 +292,41 @@ public final class SelfDefenceBehavior extends Behavior {
         } else {
             releaseShield();
         }
+    }
+
+    /**
+     * Move a shield from the inventory to the offhand so blocking actually works.
+     * Never overwrites a totem (totem has offhand priority).
+     */
+    private void equipShieldToOffhand() {
+        if (!Baritone.settings().selfDefenceUseShield.value) {
+            return;
+        }
+        ItemStack offhand = ctx.player().getItemBySlot(EquipmentSlot.OFFHAND);
+        if (offhand.getItem() == Items.SHIELD || offhand.getItem() == Items.TOTEM_OF_UNDYING) {
+            return;
+        }
+        if (tickCounter - lastShieldSwapTick < 40) {
+            return;
+        }
+        NonNullList<ItemStack> invy = ctx.player().getInventory().getNonEquipmentItems();
+        int shieldSlot = -1;
+        for (int i = 0; i < invy.size(); i++) {
+            if (invy.get(i).getItem() == Items.SHIELD) {
+                shieldSlot = i;
+                break;
+            }
+        }
+        if (shieldSlot == -1) {
+            return;
+        }
+        lastShieldSwapTick = tickCounter;
+        int sourceSlot = shieldSlot < 9 ? shieldSlot + 36 : shieldSlot;
+        int containerId = ctx.player().inventoryMenu.containerId;
+        ctx.playerController().windowClick(containerId, sourceSlot, 0, ClickType.PICKUP, ctx.player());
+        ctx.playerController().windowClick(containerId, 45, 0, ClickType.PICKUP, ctx.player());
+        ctx.playerController().windowClick(containerId, sourceSlot, 0, ClickType.PICKUP, ctx.player());
+        Helper.HELPER.logDirect("[SelfDefence] Shield moved to offhand");
     }
 
     private void releaseShield() {
