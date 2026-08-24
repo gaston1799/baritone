@@ -1016,16 +1016,29 @@ public interface MovementHelper extends ActionCosts, Helper {
     }
 
     static boolean applyUnderwaterSwimmingInputs(IPlayerContext ctx, MovementState state, BlockPos dest) {
+        // Air recovery takes priority over everything: once the air threshold is
+        // hit, stay latched at the surface until air is completely full again,
+        // even if the swim gate below would flip false for a tick.
+        boolean recoverAir = shouldRecoverWaterAir(ctx);
+        setWaterAirRecoveryLatched(ctx, recoverAir);
+        if (recoverAir) {
+            if (ctx.player() != null && ctx.player().isInWater()) {
+                state.setInput(Input.SNEAK, false);
+                state.setInput(Input.JUMP, true);
+                boolean wantsSprintSwimming = Baritone.settings().sprintInWater.value
+                        && Baritone.settings().allowSprint.value
+                        && ctx.player().getFoodData().getFoodLevel() > 6;
+                state.setInput(Input.SPRINT, wantsSprintSwimming);
+            }
+            return true;
+        }
         if (!shouldSwimUnderwater(ctx, dest)) {
             setWaterSubmergeLatched(ctx, false);
             setWaterSurfaceTravelLatched(ctx, false);
-            setWaterAirRecoveryLatched(ctx, false);
             return false;
         }
         boolean headUnderSurface = isHeadUnderWaterSurface(ctx);
         boolean swimming = ctx.player().isSwimming();
-        boolean recoverAir = shouldRecoverWaterAir(ctx);
-        setWaterAirRecoveryLatched(ctx, recoverAir);
         boolean wantsSprintSwimming = Baritone.settings().sprintInWater.value
                 && Baritone.settings().allowSprint.value
                 && ctx.player().getFoodData().getFoodLevel() > 6;

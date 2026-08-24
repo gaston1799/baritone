@@ -37,7 +37,12 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -54,6 +59,7 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -279,9 +285,6 @@ public final class CraftProcess extends BaritoneProcessHelper {
             return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
         }
         RecipeDisplayId displayId = findRecipeDisplayId(recipeNode.item);
-        if (displayId == null) {
-            return stopWith("Craft blocked: recipe book has no recipe producing " + recipeNode.itemId());
-        }
         logStep(action.description);
         AbstractContainerMenu menu = ctx.player().containerMenu;
         if (menu instanceof AbstractFurnaceMenu furnaceMenu) {
@@ -291,9 +294,39 @@ public final class CraftProcess extends BaritoneProcessHelper {
             waitingCooking = new WaitingCooking(recipeNode.recipe.station, recipeNode.item, recipeNode.recipe.id, recipeNode.missingCount());
             return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
         }
-        ctx.playerController().handlePlaceRecipe(menu.containerId, displayId, false);
+        if (displayId != null) {
+            ctx.playerController().handlePlaceRecipe(menu.containerId, displayId, false);
+        } else if (!placeRecipeViaServer(recipeNode.recipe)) {
+            return stopWith("Craft blocked: recipe book has no recipe producing " + recipeNode.itemId());
+        }
         pendingCraft = new PendingCraft(recipeNode.recipe.station, recipeNode.item, menu.containerId);
         return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+    }
+
+    /**
+     * Singleplayer fallback for undiscovered recipes: the integrated server runs in this
+     * process, so invoke RecipeBookMenu#handlePlacement directly on the server thread.
+     * This bypasses the recipe-book discovery check the normal packet path enforces.
+     */
+    private boolean placeRecipeViaServer(CraftingPlanner.NormalizedRecipe recipe) {
+        MinecraftServer server = ctx.minecraft().getSingleplayerServer();
+        if (server == null) {
+            return false;
+        }
+        ResourceKey<Recipe<?>> key = ResourceKey.create(Registries.RECIPE, recipe.id);
+        Optional<RecipeHolder<?>> holderOpt = server.getRecipeManager().byKey(key);
+        if (holderOpt.isEmpty()) {
+            return false;
+        }
+        ServerPlayer serverPlayer = server.getPlayerList().getPlayer(ctx.player().getUUID());
+        if (serverPlayer == null || !(serverPlayer.containerMenu instanceof RecipeBookMenu recipeMenu)) {
+            return false;
+        }
+        RecipeHolder<?> holder = holderOpt.get();
+        ServerLevel serverLevel = serverPlayer.serverLevel();
+        boolean craftAll = false;
+        server.execute(() -> recipeMenu.handlePlacement(craftAll, serverPlayer.isCreative(), holder, serverLevel, serverPlayer.getInventory()));
+        return true;
     }
 
     private PathingCommand handlePendingCraft() {
