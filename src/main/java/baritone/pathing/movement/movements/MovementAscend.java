@@ -225,17 +225,17 @@ public class MovementAscend extends Movement {
             return state;
         }
 
-        if (headBonkClear()) {
-            return state.setInput(Input.JUMP, true);
-        }
-
-        if (flatDistToNext > 1.2 || sideDist > 0.2) {
+        // Wait until the predicted jump arc (current speed + jump power, including
+        // jump boost) can carry us onto the landing block. Jumping the instant the
+        // head is clear (the old behavior) makes repeated 1-block ascends jump too
+        // early and bonk into the next step.
+        double predictedJump = MovementHelper.predictedJumpDistance(ctx);
+        double jumpRange = Math.max(0.6D, Math.min(predictedJump - 0.3D, 1.5D));
+        if (flatDistToNext > jumpRange || sideDist > 0.2) {
             return state;
         }
 
         // Once we are pointing the right way and moving, start jumping
-        // This is slightly more efficient because otherwise we might start jumping before moving, and fall down without moving onto the block we want to jump onto
-        // Also wait until we are close enough, because we might jump and hit our head on an adjacent block
         return state.setInput(Input.JUMP, true);
     }
 

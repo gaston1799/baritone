@@ -1110,6 +1110,42 @@ public interface MovementHelper extends ActionCosts, Helper {
         return true;
     }
 
+    /**
+     * The player's jump velocity (blocks/tick) including jump boost, replicating
+     * LivingEntity#getJumpPower: JUMP_STRENGTH * blockJumpFactor + 0.1 * (amp + 1).
+     */
+    static double playerJumpPower(IPlayerContext ctx) {
+        if (ctx.player() == null) {
+            return 0.0D;
+        }
+        double power = ctx.player().getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.JUMP_STRENGTH)
+                * ctx.player().getBlockStateOn().getBlock().getJumpFactor();
+        if (ctx.player().hasEffect(net.minecraft.world.effect.MobEffects.JUMP_BOOST)) {
+            power += 0.1D * (ctx.player().getEffect(net.minecraft.world.effect.MobEffects.JUMP_BOOST).getAmplifier() + 1);
+        }
+        return power;
+    }
+
+    /**
+     * How far (in blocks) a full jump would carry the player horizontally at their
+     * current velocity, accounting for jump boost and speed effects (the latter are
+     * already reflected in the current horizontal velocity). Includes per-tick air
+     * drag (0.91) on the horizontal component.
+     */
+    static double predictedJumpDistance(IPlayerContext ctx) {
+        if (ctx.player() == null) {
+            return 0.0D;
+        }
+        double speed = ctx.player().getDeltaMovement().horizontalDistance();
+        double jumpPower = playerJumpPower(ctx);
+        if (jumpPower <= 0.0D) {
+            return 0.0D;
+        }
+        double airTime = 2.0D * jumpPower / 0.08D; // ticks up and back down to the same height
+        double dragSum = (1.0D - Math.pow(0.91D, airTime)) / 0.09D;
+        return speed * dragSum;
+    }
+
     static void moveTowardsWithoutRotation(IPlayerContext ctx, MovementState state, float idealYaw) {
         MovementOption.getOptions(
                 Mth.sin(ctx.playerRotations().getYaw() * DEG_TO_RAD_F),
