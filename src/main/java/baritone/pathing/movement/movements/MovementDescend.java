@@ -22,6 +22,7 @@ import baritone.api.IBaritone;
 import baritone.api.pathing.movement.MovementStatus;
 import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.RotationUtils;
+import baritone.api.utils.VecUtils;
 import baritone.api.utils.input.Input;
 import baritone.pathing.movement.CalculationContext;
 import baritone.pathing.movement.Movement;
@@ -257,7 +258,10 @@ public class MovementDescend extends Movement {
         state.setInput(Input.SNEAK, Baritone.settings().allowWalkOnMagmaBlocks.value && ctx.world().getBlockState(ctx.player().blockPosition().below()).is(Blocks.MAGMA_BLOCK));
 
         if (!playerFeet.equals(dest) || ab > 0.25) {
-            if (playerFeet.equals(dest) && MovementHelper.moveBackIfOvershot(ctx, state, src, dest, 0.25D)) {
+            // when falling fast, don't try to walk backwards to "correct" an
+            // overshoot mid-air - that causes the backward flicker; let the
+            // fall carry us and re-sync on the ground instead
+            if (playerFeet.equals(dest) && ctx.player().getDeltaMovement().y > -0.2D && MovementHelper.moveBackIfOvershot(ctx, state, src, dest, 0.25D)) {
                 return state;
             }
             if (numTicks++ < 20 && fromStart < 1.25) {
@@ -266,6 +270,11 @@ public class MovementDescend extends Movement {
                 MovementHelper.moveTowards(ctx, state, dest);
             }
         }
+        // look down toward the landing spot while descending - human-like
+        state.setTarget(new MovementState.MovementTarget(
+                RotationUtils.calcRotationFromVec3d(ctx.playerHead(), VecUtils.getBlockPosCenter(dest), ctx.playerRotations()),
+                false
+        ));
         return state;
     }
 

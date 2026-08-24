@@ -1146,6 +1146,104 @@ public interface MovementHelper extends ActionCosts, Helper {
         return speed * dragSum;
     }
 
+    /**
+     * Max sprint speed in blocks/tick including speed effects (attribute 0.1 base
+     * -> 0.13 sprinting -> 2.16 block conversion).
+     */
+    static double maxSprintSpeed(IPlayerContext ctx) {
+        if (ctx.player() == null) {
+            return 0.2806D;
+        }
+        return 2.16D * ctx.player().getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED);
+    }
+
+    /**
+     * Forward walk-ahead takeoff solver for 1-block ascends.
+     * <p>
+     * Simulates the jump that would be launched from the player's CURRENT position
+     * and velocity, but with the horizontal direction taken from the movement's
+     * dest (not the player's momentary movement vector, which can point elsewhere),
+     * the current ground speed accelerated toward sprint max (walk-ahead), and the
+     * vanilla sprint-jump boost (x1.3) applied on the launch tick. The trajectory
+     * is then stepped tick by tick:
+     * <ul>
+     * <li>any block in the player's body band (feet+1, feet+2) that is not
+     *     passable = head bonk / wall hit -> the takeoff is invalid</li>
+     * <li>when the horizontal travel crosses the dest's X/Z, the feet height must
+     *     be at or above the dest's top, otherwise the jump is too close / too far
+     *     and the player collides with the step face</li>
+     * </ul>
+     * Returns true only when a jump launched right now would cleanly carry the
+     * player onto the ascend dest. Re-run every tick; as the player walks closer
+     * the crossing happens at a different point of the arc, so the first tick that
+     * returns true is the optimal takeoff.
+     */
+    static boolean jumpClearsAscend(IPlayerContext ctx, BetterBlockPos src, BetterBlockPos dest) {
+        if (ctx.player() == null) {
+            return false;
+        }
+        Vec3 pos = ctx.player().position();
+        double dx = (dest.getX() + 0.5D) - pos.x;
+        double dz = (dest.getZ() + 0.5D) - pos.z;
+        double flat = Math.sqrt(dx * dx + dz * dz);
+        if (flat < 0.2D) {
+            return true; // basically already there
+        }
+        double dirX = dx / flat;
+        double dirZ = dz / flat;
+        Vec3 vel = ctx.player().getDeltaMovement();
+        // forward component of current velocity along the dest direction, accelerated
+        double speed = Math.abs(dirX * vel.x + dirZ * vel.z);
+        double maxSpeed = maxSprintSpeed(ctx);
+        if (Baritone.settings().allowSprint.value) {
+            speed = Math.min(speed + 0.086D, maxSpeed); // ground accel walk-ahead
+        } else {
+            speed = Math.min(speed, 0.215D); // walking
+        }
+        double jumpPower = playerJumpPower(ctx);
+        if (jumpPower <= 0.0D) {
+            return false;
+        }
+        // sprint-jump launch: x1.3 horizontal boost, jump power vertically
+        double vx = dirX * speed * 1.3D;
+        double vz = dirZ * speed * 1.3D;
+        double vy = jumpPower;
+        double px = pos.x, py = pos.y, pz = pos.z;
+        double traveled = 0.0D;
+        for (int i = 0; i < 30; i++) {
+            px += vx;
+            py += vy;
+            pz += vz;
+            traveled += Math.sqrt(vx * vx + vz * vz);
+            vy -= 0.08D;
+            vx *= 0.91D;
+            vz *= 0.91D;
+            if (traveled < 0.15D) {
+                continue; // ignore the first sliver of movement, still on takeoff block
+            }
+            int bx = Mth.floor(px);
+            int by = Mth.floor(py);
+            int bz = Mth.floor(pz);
+            // body band check: anything solid at torso/head height = bonk
+            BetterBlockPos bandPos = new BetterBlockPos(bx, by + 1, bz);
+            if (!canWalkThrough(ctx, bandPos) || !canWalkThrough(ctx, bandPos.above())) {
+                return false;
+            }
+            if (traveled >= flat - 0.25D && traveled <= flat + 0.75D) {
+                // horizontally at the dest - feet must clear the step top
+                if (py >= dest.getY() + 0.1D) {
+                    return true;
+                }
+            }
+            if (traveled > flat + 0.75D) {
+                // passed the dest while too low - this takeoff is too close; a jump
+                // from further back would have crossed higher up the arc
+                return false;
+            }
+        }
+        return false; // could not reach dest at all (too far) - keep walking
+    }
+
     static void moveTowardsWithoutRotation(IPlayerContext ctx, MovementState state, float idealYaw) {
         MovementOption.getOptions(
                 Mth.sin(ctx.playerRotations().getYaw() * DEG_TO_RAD_F),

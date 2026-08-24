@@ -27,6 +27,8 @@ import baritone.pathing.movement.Movement;
 import baritone.pathing.movement.MovementHelper;
 import baritone.pathing.movement.MovementState;
 import baritone.utils.BlockStateInterface;
+import baritone.api.utils.RotationUtils;
+import baritone.api.utils.VecUtils;
 import com.google.common.collect.ImmutableSet;
 import java.util.Set;
 import net.minecraft.core.Direction;
@@ -225,13 +227,17 @@ public class MovementAscend extends Movement {
             return state;
         }
 
-        // Wait until the predicted jump arc (current speed + jump power, including
-        // jump boost) can carry us onto the landing block. Jumping the instant the
-        // head is clear (the old behavior) makes repeated 1-block ascends jump too
-        // early and bonk into the next step.
-        double predictedJump = MovementHelper.predictedJumpDistance(ctx);
-        double jumpRange = Math.max(0.6D, Math.min(predictedJump - 0.3D, 1.5D));
-        if (flatDistToNext > jumpRange || sideDist > 0.2) {
+        // Forward walk-ahead: simulate the sprint-boosted jump from the current
+        // position toward the dest and jump the moment the arc would clear the
+        // step without bonking. Re-run every tick so the takeoff point is
+        // continuously corrected as the player approaches (fixes "not jumping").
+        if (sideDist > 0.2 || !MovementHelper.jumpClearsAscend(ctx, src, dest)) {
+            // not ready yet - keep walking; look up toward the step so the bot
+            // appears to be scanning the ascent
+            state.setTarget(new MovementState.MovementTarget(
+                    RotationUtils.calcRotationFromVec3d(ctx.playerHead(), VecUtils.getBlockPosCenter(dest), ctx.playerRotations()),
+                    false
+            ));
             return state;
         }
 
