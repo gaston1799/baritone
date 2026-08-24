@@ -188,6 +188,26 @@ public final class Settings {
     public final Setting<Double> selfDefenceCreeperSafeDistance = new Setting<>(3.0D);
 
     /**
+     * While self defence is active, automatically move a totem of undying from
+     * the inventory to the offhand when the player's health drops to or below
+     * this value. Set to 0 to disable.
+     */
+    public final Setting<Double> selfDefenceTotemHealth = new Setting<>(6.0D);
+
+    /**
+     * While self defence is active, raise the shield (offhand) during the weapon
+     * attack cooldown so incoming melee hits are blocked instead of tanked.
+     */
+    public final Setting<Boolean> selfDefenceUseShield = new Setting<>(true);
+
+    /**
+     * While self defence is active and the target is in melee reach, circle
+     * strafe around it instead of standing still - harder to hit, and looks
+     * more human under freecam.
+     */
+    public final Setting<Boolean> selfDefenceStrafe = new Setting<>(true);
+
+    /**
      * Allow Baritone to place blocks
      */
     public final Setting<Boolean> allowPlace = new Setting<>(true);

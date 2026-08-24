@@ -29,11 +29,15 @@ import baritone.api.utils.Rotation;
 import baritone.api.utils.input.Input;
 import baritone.utils.combat.SelfDefenceHelper;
 import net.minecraft.core.NonNullList;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.monster.Enemy;
+import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.Comparator;
@@ -57,6 +61,11 @@ public final class SelfDefenceBehavior extends Behavior {
     private int currentTargetLastSeenTick;
     private Settings.AttackType currentAttackType;
     private PendingAttack pendingAttack;
+    private int strafeDirection = 1;
+    private int strafeDirSwitchTick;
+    private boolean shieldOwned;
+    private boolean strafeOwned;
+    private int lastTotemSwapTick = -100;
 
     public SelfDefenceBehavior(Baritone baritone) {
         super(baritone);
@@ -103,6 +112,7 @@ public final class SelfDefenceBehavior extends Behavior {
 
         if (!ctx.player().hasLineOfSight(currentTarget) || !SelfDefenceHelper.withinMeleeReach(ctx.playerHead(), currentTarget)) {
             resetJumpState();
+            releaseCombatInputs();
             return;
         }
         Rotation look = SelfDefenceHelper.rotationToTarget(ctx.playerHead(), ctx.playerRotations(), currentTarget);
@@ -111,19 +121,29 @@ public final class SelfDefenceBehavior extends Behavior {
         // A golden apple being eaten is critical survival: finish the eat
         // before engaging (attacking would cancel it).
         if (baritone.getInventoryBehavior().isEatingGoldenApple()) {
+            releaseCombatInputs();
             return;
         }
 
         SelfDefenceHelper.WeaponChoice weapon = equipWeapon();
         if (weapon == null) {
             resetJumpState();
+            releaseCombatInputs();
             return;
         }
         Settings.AttackType attackType = SelfDefenceHelper.effectiveAttackType(Baritone.settings().attackType.value, weapon);
         currentAttackType = attackType;
         baritone.getInputOverrideHandler().setInputForceState(Input.SPRINT, false);
         ctx.player().setSprinting(false);
+        handleTotemHotswap();
+        if (SelfDefenceHelper.withinMeleeReach(ctx.playerHead(), currentTarget)) {
+            handleShield();
+            handleStrafe();
+        } else {
+            releaseCombatInputs();
+        }
         if (SelfDefenceHelper.useJumpCrit(attackType)) {
+            releaseCombatInputs();
             handleJumpCrit();
             return;
         }
@@ -201,6 +221,7 @@ public final class SelfDefenceBehavior extends Behavior {
         baritone.getLookBehavior().updateTarget(new Rotation(awayYaw, ctx.playerRotations().getPitch()), false);
         baritone.getInputOverrideHandler().setInputForceState(Input.MOVE_FORWARD, true);
         resetJumpState();
+        releaseCombatInputs();
         return true;
     }
 
@@ -220,6 +241,94 @@ public final class SelfDefenceBehavior extends Behavior {
         if (ctx.playerHead().distanceToSqr(aimPoint) < kiteDistSq) {
             baritone.getInputOverrideHandler().setInputForceState(Input.MOVE_BACK, true);
         }
+    }
+
+    private void handleTotemHotswap() {
+        double threshold = Baritone.settings().selfDefenceTotemHealth.value;
+        if (threshold <= 0.0D || ctx.player().getHealth() > (float) threshold) {
+            return;
+        }
+        if (ctx.player().getItemBySlot(EquipmentSlot.OFFHAND).getItem() == Items.TOTEM_OF_UNDYING) {
+            return;
+        }
+        if (tickCounter - lastTotemSwapTick < 20) {
+            return; // don't spam container clicks every tick
+        }
+        NonNullList<ItemStack> invy = ctx.player().getInventory().getNonEquipmentItems();
+        int totemSlot = -1;
+        for (int i = 0; i < invy.size(); i++) {
+            if (invy.get(i).getItem() == Items.TOTEM_OF_UNDYING) {
+                totemSlot = i;
+                break;
+            }
+        }
+        if (totemSlot == -1) {
+            return;
+        }
+        lastTotemSwapTick = tickCounter;
+        int sourceSlot = totemSlot < 9 ? totemSlot + 36 : totemSlot;
+        int containerId = ctx.player().inventoryMenu.containerId;
+        ctx.playerController().windowClick(containerId, sourceSlot, 0, ClickType.PICKUP, ctx.player());
+        ctx.playerController().windowClick(containerId, 45, 0, ClickType.PICKUP, ctx.player());
+        ctx.playerController().windowClick(containerId, sourceSlot, 0, ClickType.PICKUP, ctx.player());
+        Helper.HELPER.logDirect("[SelfDefence] Totem moved to offhand (hp " + ctx.player().getHealth() + ")");
+    }
+
+    /**
+     * Raise the shield during weapon cooldown so melee hits are blocked. The
+     * attack itself is issued via the player controller, so holding USE only
+     * blocks and never interrupts the swing.
+     */
+    private void handleShield() {
+        boolean wantShield = Baritone.settings().selfDefenceUseShield.value
+                && ctx.player().getItemBySlot(EquipmentSlot.OFFHAND).getItem() == Items.SHIELD
+                && !weaponReady()
+                && !jumpAttackQueued;
+        if (wantShield) {
+            shieldOwned = true;
+            baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
+        } else {
+            releaseShield();
+        }
+    }
+
+    private void releaseShield() {
+        if (shieldOwned) {
+            shieldOwned = false;
+            baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, false);
+        }
+    }
+
+    /**
+     * Circle the target: hold a sideways input perpendicular to the aim line,
+     * switching direction every 40 ticks so the bot orbits instead of walking
+     * into terrain.
+     */
+    private void handleStrafe() {
+        if (!Baritone.settings().selfDefenceStrafe.value || !ctx.player().onGround()) {
+            releaseStrafe();
+            return;
+        }
+        if (tickCounter >= strafeDirSwitchTick) {
+            strafeDirection = -strafeDirection;
+            strafeDirSwitchTick = tickCounter + 40;
+        }
+        strafeOwned = true;
+        baritone.getInputOverrideHandler().setInputForceState(Input.MOVE_LEFT, strafeDirection == 1);
+        baritone.getInputOverrideHandler().setInputForceState(Input.MOVE_RIGHT, strafeDirection == -1);
+    }
+
+    private void releaseStrafe() {
+        if (strafeOwned) {
+            strafeOwned = false;
+            baritone.getInputOverrideHandler().setInputForceState(Input.MOVE_LEFT, false);
+            baritone.getInputOverrideHandler().setInputForceState(Input.MOVE_RIGHT, false);
+        }
+    }
+
+    private void releaseCombatInputs() {
+        releaseShield();
+        releaseStrafe();
     }
 
     private void handleJumpCrit() {
@@ -445,6 +554,7 @@ public final class SelfDefenceBehavior extends Behavior {
         recentThreatExpiry.clear();
         pendingAttack = null;
         lastKnownHealth = Float.NaN;
+        releaseCombatInputs();
         resetJumpState();
     }
 
