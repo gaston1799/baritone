@@ -63,6 +63,11 @@ public final class MinecraftRecipeCatalog implements CraftingPlanner.RecipeLooku
 
     public static MinecraftRecipeCatalog create(Level level) {
         MinecraftServer server = level.getServer();
+        if (server == null) {
+            // Singleplayer: the integrated server runs in this process and has the
+            // complete recipe list (vanilla datapacks + modded recipes).
+            server = Minecraft.getInstance().getSingleplayerServer();
+        }
         if (server != null) {
             return createFromRecipeManager(server.getRecipeManager(), level.registryAccess());
         }
@@ -160,25 +165,54 @@ public final class MinecraftRecipeCatalog implements CraftingPlanner.RecipeLooku
     private static MinecraftRecipeCatalog createFromRecipeManager(RecipeManager recipeManager, RegistryAccess registryAccess) {
         Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult = new LinkedHashMap<>();
         for (RecipeHolder<?> holder : recipeManager.getRecipes()) {
-            if (holder.value().getType() != net.minecraft.world.item.crafting.RecipeType.CRAFTING) {
-                continue;
+            net.minecraft.world.item.crafting.Recipe<?> value = holder.value();
+            if (value.getType() == net.minecraft.world.item.crafting.RecipeType.CRAFTING) {
+                net.minecraft.world.item.crafting.CraftingRecipe recipe = (net.minecraft.world.item.crafting.CraftingRecipe) value;
+                ItemStack result = recipe.assemble(net.minecraft.world.item.crafting.CraftingInput.EMPTY, registryAccess);
+                if (result.isEmpty()) {
+                    continue;
+                }
+                CraftingPlanner.StationKind station = recipe.placementInfo().ingredients().size() <= 4
+                        ? CraftingPlanner.StationKind.HAND_CRAFTING
+                        : CraftingPlanner.StationKind.CRAFTING_TABLE;
+                addRecipe(byResult, new CraftingPlanner.NormalizedRecipe(
+                        holder.id().location(),
+                        station,
+                        result.getItem(),
+                        result.getCount(),
+                        flattenIngredients(recipe.placementInfo().ingredients()),
+                        false
+                ));
+            } else if (value instanceof net.minecraft.world.item.crafting.AbstractCookingRecipe cooking) {
+                CraftingPlanner.StationKind station;
+                if (value.getType() == net.minecraft.world.item.crafting.RecipeType.SMELTING) {
+                    station = CraftingPlanner.StationKind.FURNACE;
+                } else if (value.getType() == net.minecraft.world.item.crafting.RecipeType.BLASTING) {
+                    station = CraftingPlanner.StationKind.BLAST_FURNACE;
+                } else if (value.getType() == net.minecraft.world.item.crafting.RecipeType.SMOKING) {
+                    station = CraftingPlanner.StationKind.SMOKER;
+                } else if (value.getType() == net.minecraft.world.item.crafting.RecipeType.CAMPFIRE_COOKING) {
+                    station = CraftingPlanner.StationKind.CAMPFIRE;
+                } else {
+                    continue;
+                }
+                ItemStack result = cooking.assemble(new net.minecraft.world.item.crafting.SingleRecipeInput(ItemStack.EMPTY), registryAccess);
+                if (result.isEmpty()) {
+                    continue;
+                }
+                List<CraftingPlanner.IngredientChoice> ingredients = flattenIngredients(cooking.placementInfo().ingredients());
+                if (ingredients.isEmpty()) {
+                    continue;
+                }
+                addRecipe(byResult, new CraftingPlanner.NormalizedRecipe(
+                        holder.id().location(),
+                        station,
+                        result.getItem(),
+                        result.getCount(),
+                        ingredients,
+                        true
+                ));
             }
-            net.minecraft.world.item.crafting.CraftingRecipe recipe = (net.minecraft.world.item.crafting.CraftingRecipe) holder.value();
-            ItemStack result = recipe.assemble(net.minecraft.world.item.crafting.CraftingInput.EMPTY, registryAccess);
-            if (result.isEmpty()) {
-                continue;
-            }
-            CraftingPlanner.StationKind station = recipe.placementInfo().ingredients().size() <= 4
-                    ? CraftingPlanner.StationKind.HAND_CRAFTING
-                    : CraftingPlanner.StationKind.CRAFTING_TABLE;
-            addRecipe(byResult, new CraftingPlanner.NormalizedRecipe(
-                    holder.id().location(),
-                    station,
-                    result.getItem(),
-                    result.getCount(),
-                    flattenIngredients(recipe.placementInfo().ingredients()),
-                    false
-            ));
         }
         sortRecipes(byResult);
         return new MinecraftRecipeCatalog(byResult);
