@@ -17,23 +17,25 @@
 
 package baritone.utils.craft;
 
-import net.minecraft.core.NonNullList;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.client.gui.screens.recipebook.RecipeCollection;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.Holder;
 import net.minecraft.core.RegistryAccess;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.AbstractCookingRecipe;
-import net.minecraft.world.item.crafting.CraftingRecipe;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
-import net.minecraft.world.item.crafting.RecipeManager;
-import net.minecraft.world.item.crafting.CraftingInput;
 import net.minecraft.world.item.crafting.RecipeHolder;
-import net.minecraft.world.item.crafting.RecipeType;
-import net.minecraft.world.item.crafting.SingleRecipeInput;
+import net.minecraft.world.item.crafting.RecipeManager;
+import net.minecraft.world.item.crafting.display.FurnaceRecipeDisplay;
+import net.minecraft.world.item.crafting.display.RecipeDisplay;
+import net.minecraft.world.item.crafting.display.RecipeDisplayEntry;
+import net.minecraft.world.item.crafting.display.ShapedCraftingRecipeDisplay;
+import net.minecraft.world.item.crafting.display.ShapelessCraftingRecipeDisplay;
+import net.minecraft.world.item.crafting.display.SlotDisplay;
 import net.minecraft.world.level.Level;
 
 import java.util.ArrayList;
@@ -43,6 +45,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Indexes the recipes available to the player so the craft planner can find
+ * a recipe by result item.
+ *
+ * 1.21.5 removed the client-side RecipeManager; recipe data now lives in the
+ * recipe book as RecipeDisplayEntry objects (server-side, falls back to the
+ * real RecipeManager when a server level is available, e.g. in tests).
+ */
 public final class MinecraftRecipeCatalog implements CraftingPlanner.RecipeLookup {
 
     private final Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult;
@@ -52,22 +62,21 @@ public final class MinecraftRecipeCatalog implements CraftingPlanner.RecipeLooku
     }
 
     public static MinecraftRecipeCatalog create(Level level) {
-        RegistryAccess registryAccess = level.registryAccess();
-        RecipeManager recipeManager = clientRecipeManager(level);
-        if (recipeManager == null) {
+        MinecraftServer server = level.getServer();
+        if (server != null) {
+            return createFromRecipeManager(server.getRecipeManager(), level.registryAccess());
+        }
+        LocalPlayer player = Minecraft.getInstance().player;
+        if (player == null) {
             return new MinecraftRecipeCatalog(new LinkedHashMap<>());
         }
         Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult = new LinkedHashMap<>();
-
-        addCraftingRecipes(byResult, recipeManager, registryAccess);
-        addCookingRecipes(byResult, recipeManager, registryAccess, RecipeType.SMELTING, CraftingPlanner.StationKind.FURNACE);
-        addCookingRecipes(byResult, recipeManager, registryAccess, RecipeType.BLASTING, CraftingPlanner.StationKind.BLAST_FURNACE);
-        addCookingRecipes(byResult, recipeManager, registryAccess, RecipeType.SMOKING, CraftingPlanner.StationKind.SMOKER);
-        addCookingRecipes(byResult, recipeManager, registryAccess, RecipeType.CAMPFIRE_COOKING, CraftingPlanner.StationKind.CAMPFIRE);
-
-        for (List<CraftingPlanner.NormalizedRecipe> recipes : byResult.values()) {
-            recipes.sort(Comparator.comparing(recipe -> recipe.id.toString()));
+        for (RecipeCollection collection : player.getRecipeBook().getCollections()) {
+            for (RecipeDisplayEntry entry : collection.getRecipes()) {
+                addDisplayRecipe(byResult, entry);
+            }
         }
+        sortRecipes(byResult);
         return new MinecraftRecipeCatalog(byResult);
     }
 
@@ -76,25 +85,86 @@ public final class MinecraftRecipeCatalog implements CraftingPlanner.RecipeLooku
         return byResult.getOrDefault(item, Collections.emptyList());
     }
 
-    private static RecipeManager clientRecipeManager(Level level) {
-        ClientPacketListener connection = Minecraft.getInstance().getConnection();
-        if (connection != null) {
-            return (RecipeManager) connection.recipes();
+    private static void addDisplayRecipe(Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult, RecipeDisplayEntry entry) {
+        RecipeDisplay display = entry.display();
+        CraftingPlanner.StationKind station;
+        boolean cooking;
+        ItemStack result;
+        if (display instanceof ShapedCraftingRecipeDisplay shaped) {
+            station = (shaped.width() <= 2 && shaped.height() <= 2)
+                    ? CraftingPlanner.StationKind.HAND_CRAFTING
+                    : CraftingPlanner.StationKind.CRAFTING_TABLE;
+            cooking = false;
+            result = resolveSlot(shaped.result());
+        } else if (display instanceof ShapelessCraftingRecipeDisplay shapeless) {
+            station = shapeless.ingredients().size() <= 4
+                    ? CraftingPlanner.StationKind.HAND_CRAFTING
+                    : CraftingPlanner.StationKind.CRAFTING_TABLE;
+            cooking = false;
+            result = resolveSlot(shapeless.result());
+        } else if (display instanceof FurnaceRecipeDisplay furnace) {
+            station = stationFromStationDisplay(furnace.craftingStation());
+            cooking = true;
+            result = resolveSlot(furnace.result());
+        } else {
+            return; // smithing, stonecutter, ...
         }
-        MinecraftServer server = level.getServer();
-        if (server != null) {
-            return server.getRecipeManager();
+        if (result == null || result.isEmpty()) {
+            return;
+        }
+        List<CraftingPlanner.IngredientChoice> ingredients = flattenIngredients(
+                entry.craftingRequirements().orElse(Collections.emptyList()));
+        if (cooking && ingredients.isEmpty()) {
+            return;
+        }
+        // Display entries don't carry the recipe's ResourceLocation; use the display id as a stable synthetic key.
+        ResourceLocation id = ResourceLocation.fromNamespaceAndPath("baritone_craft", Integer.toString(entry.id().index()));
+        addRecipe(byResult, new CraftingPlanner.NormalizedRecipe(
+                id,
+                station,
+                result.getItem(),
+                result.getCount(),
+                ingredients,
+                cooking
+        ));
+    }
+
+    private static CraftingPlanner.StationKind stationFromStationDisplay(SlotDisplay stationSlot) {
+        ItemStack stack = resolveSlot(stationSlot);
+        if (stack == null) {
+            return CraftingPlanner.StationKind.FURNACE;
+        }
+        Item item = stack.getItem();
+        if (item == Items.BLAST_FURNACE) {
+            return CraftingPlanner.StationKind.BLAST_FURNACE;
+        }
+        if (item == Items.SMOKER) {
+            return CraftingPlanner.StationKind.SMOKER;
+        }
+        if (item == Items.CAMPFIRE || item == Items.SOUL_CAMPFIRE) {
+            return CraftingPlanner.StationKind.CAMPFIRE;
+        }
+        return CraftingPlanner.StationKind.FURNACE;
+    }
+
+    private static ItemStack resolveSlot(SlotDisplay slot) {
+        if (slot instanceof SlotDisplay.ItemStackSlotDisplay stackDisplay) {
+            return stackDisplay.stack();
+        }
+        if (slot instanceof SlotDisplay.ItemSlotDisplay itemDisplay) {
+            return new ItemStack(itemDisplay.item());
         }
         return null;
     }
 
-    private static void addCraftingRecipes(Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult, RecipeManager recipeManager, RegistryAccess registryAccess) {
+    private static MinecraftRecipeCatalog createFromRecipeManager(RecipeManager recipeManager, RegistryAccess registryAccess) {
+        Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult = new LinkedHashMap<>();
         for (RecipeHolder<?> holder : recipeManager.getRecipes()) {
-            if (holder.value().getType() != RecipeType.CRAFTING) {
+            if (holder.value().getType() != net.minecraft.world.item.crafting.RecipeType.CRAFTING) {
                 continue;
             }
-            CraftingRecipe recipe = (CraftingRecipe) holder.value();
-            ItemStack result = recipe.assemble(CraftingInput.EMPTY, registryAccess);
+            net.minecraft.world.item.crafting.CraftingRecipe recipe = (net.minecraft.world.item.crafting.CraftingRecipe) holder.value();
+            ItemStack result = recipe.assemble(net.minecraft.world.item.crafting.CraftingInput.EMPTY, registryAccess);
             if (result.isEmpty()) {
                 continue;
             }
@@ -110,30 +180,13 @@ public final class MinecraftRecipeCatalog implements CraftingPlanner.RecipeLooku
                     false
             ));
         }
+        sortRecipes(byResult);
+        return new MinecraftRecipeCatalog(byResult);
     }
 
-    private static void addCookingRecipes(Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult, RecipeManager recipeManager, RegistryAccess registryAccess, RecipeType<? extends AbstractCookingRecipe> type, CraftingPlanner.StationKind station) {
-        for (RecipeHolder<?> holder : recipeManager.getRecipes()) {
-            if (holder.value().getType() != type) {
-                continue;
-            }
-            AbstractCookingRecipe recipe = (AbstractCookingRecipe) holder.value();
-            ItemStack result = recipe.assemble(new SingleRecipeInput(ItemStack.EMPTY), registryAccess);
-            if (result.isEmpty()) {
-                continue;
-            }
-            List<CraftingPlanner.IngredientChoice> ingredients = flattenIngredients(recipe.placementInfo().ingredients());
-            if (ingredients.isEmpty()) {
-                continue;
-            }
-            addRecipe(byResult, new CraftingPlanner.NormalizedRecipe(
-                    holder.id().location(),
-                    station,
-                    result.getItem(),
-                    result.getCount(),
-                    ingredients,
-                    true
-            ));
+    private static void sortRecipes(Map<Item, List<CraftingPlanner.NormalizedRecipe>> byResult) {
+        for (List<CraftingPlanner.NormalizedRecipe> recipes : byResult.values()) {
+            recipes.sort(Comparator.comparing(recipe -> recipe.id.toString()));
         }
     }
 
