@@ -34,6 +34,7 @@ import baritone.api.utils.VecUtils;
 import baritone.api.utils.interfaces.IGoalRenderPos;
 import baritone.behavior.PathingBehavior;
 import baritone.command.defaults.TempPathCommand;
+import baritone.pathing.movement.MovementHelper;
 import baritone.pathing.movement.movements.AscendDebugInfo;
 import baritone.pathing.movement.movements.AscendDebugTrace;
 import baritone.pathing.movement.movements.ParkourDebugInfo;
@@ -433,11 +434,17 @@ public final class PathRenderer implements IRenderer {
         if (start == null || end == null) {
             return;
         }
-        IRenderer.startLines(new Color(255, 220, 0), 0.6F, settings.pathRenderLineWidthPixels.value, settings.renderSelectionBoxesIgnoreDepth.value);
+        // depth-free so the line is visible even through terrain
+        IRenderer.startLines(new Color(255, 220, 0), 0.6F, settings.pathRenderLineWidthPixels.value, true);
         IRenderer.emitLine(stack,
                 start.getX() + 0.5D, start.getY() + 1.0D, start.getZ() + 0.5D,
                 end.getX() + 0.5D, end.getY() + 1.0D, end.getZ() + 0.5D);
-        IRenderer.endLines(settings.renderSelectionBoxesIgnoreDepth.value);
+        IRenderer.endLines(true);
+        // point markers so the ends are always visible
+        IRenderer.startLines(new Color(255, 220, 0), 0.8F, settings.pathRenderLineWidthPixels.value, true);
+        IRenderer.emitAABB(stack, new AABB(start.getX(), start.getY(), start.getZ(), start.getX() + 1, start.getY() + 2, start.getZ() + 1));
+        IRenderer.emitAABB(stack, new AABB(end.getX(), end.getY(), end.getZ(), end.getX() + 1, end.getY() + 2, end.getZ() + 1));
+        IRenderer.endLines(true);
     }
 
     private static void renderJumpArc(PoseStack stack, IPlayerContext ctx) {
@@ -457,12 +464,12 @@ public final class PathRenderer implements IRenderer {
             vx = -Math.sin(yaw) * 0.25D;
             vz = Math.cos(yaw) * 0.25D;
         }
-        IRenderer.startLines(new Color(0, 255, 200), 0.6F, settings.pathRenderLineWidthPixels.value, settings.renderSelectionBoxesIgnoreDepth.value);
+        IRenderer.startLines(new Color(0, 255, 200), 0.6F, settings.pathRenderLineWidthPixels.value, true);
         double px = pos.x, py = pos.y, pz = pos.z;
-        double startY = pos.y;
-        double landX = px, landY = py, landZ = pz;
         boolean landed = false;
-        for (int i = 0; i < 24; i++) {
+        boolean landedInAir = false;
+        double landX = 0, landY = 0, landZ = 0;
+        for (int i = 0; i < 40; i++) {
             double nx = px + vx;
             double ny = py + vy;
             double nz = pz + vz;
@@ -473,22 +480,31 @@ public final class PathRenderer implements IRenderer {
             vy -= 0.08D;
             vx *= 0.91D;
             vz *= 0.91D;
-            if (py < startY - 0.5D) {
-                landed = true;
-                landX = px;
-                landY = py;
-                landZ = pz;
-                break;
+            // only consider landing while descending, and only on solid ground
+            if (vy < 0.0D && py <= pos.y) {
+                int bx = Mth.floor(px);
+                int by = Mth.floor(py) - 1;
+                int bz = Mth.floor(pz);
+                if (MovementHelper.canWalkOn(ctx, new BetterBlockPos(bx, by, bz))) {
+                    landed = true;
+                    landX = px;
+                    landY = py;
+                    landZ = pz;
+                    break;
+                }
             }
         }
-        IRenderer.endLines(settings.renderSelectionBoxesIgnoreDepth.value);
+        IRenderer.endLines(true);
         if (landed) {
-            int bx = Mth.floor(landX);
-            int by = Mth.floor(landY);
-            int bz = Mth.floor(landZ);
-            IRenderer.startLines(new Color(255, 255, 255), 0.8F, settings.pathRenderLineWidthPixels.value, settings.renderSelectionBoxesIgnoreDepth.value);
-            IRenderer.emitAABB(stack, new AABB(bx, by, bz, bx + 1, by + 1, bz + 1));
-            IRenderer.endLines(settings.renderSelectionBoxesIgnoreDepth.value);
+            // white marker on the solid block the arc lands on
+            IRenderer.startLines(new Color(255, 255, 255), 0.8F, settings.pathRenderLineWidthPixels.value, true);
+            IRenderer.emitAABB(stack, new AABB(Mth.floor(landX), Mth.floor(landY) - 1, Mth.floor(landZ), Mth.floor(landX) + 1, Mth.floor(landY), Mth.floor(landZ) + 1));
+            IRenderer.endLines(true);
+        } else {
+            // no solid ground under the landing point - mark it red so it's obvious
+            IRenderer.startLines(new Color(255, 60, 60), 0.8F, settings.pathRenderLineWidthPixels.value, true);
+            IRenderer.emitAABB(stack, new AABB(Mth.floor(px), Mth.floor(py) - 1, Mth.floor(pz), Mth.floor(px) + 1, Mth.floor(py), Mth.floor(pz) + 1));
+            IRenderer.endLines(true);
         }
     }
 
