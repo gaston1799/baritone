@@ -24,6 +24,7 @@ import baritone.api.event.events.WorldEvent;
 import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalNear;
 import baritone.api.utils.BetterBlockPos;
+import baritone.api.utils.Helper;
 import baritone.api.utils.Rotation;
 import baritone.api.utils.input.Input;
 import baritone.utils.combat.SelfDefenceHelper;
@@ -54,6 +55,8 @@ public final class SelfDefenceBehavior extends Behavior {
     private int jumpQueuedAtTick;
     private float lastKnownHealth = Float.NaN;
     private int currentTargetLastSeenTick;
+    private Settings.AttackType currentAttackType;
+    private PendingAttack pendingAttack;
 
     public SelfDefenceBehavior(Baritone baritone) {
         super(baritone);
@@ -66,6 +69,7 @@ public final class SelfDefenceBehavior extends Behavior {
             return;
         }
         tickCounter++;
+        checkPendingAttackResult();
         if (ctx.player() == null || ctx.world() == null || !Baritone.settings().selfDefence.value) {
             clearCombatState();
             return;
@@ -116,6 +120,7 @@ public final class SelfDefenceBehavior extends Behavior {
             return;
         }
         Settings.AttackType attackType = SelfDefenceHelper.effectiveAttackType(Baritone.settings().attackType.value, weapon);
+        currentAttackType = attackType;
         baritone.getInputOverrideHandler().setInputForceState(Input.SPRINT, false);
         ctx.player().setSprinting(false);
         if (SelfDefenceHelper.useJumpCrit(attackType)) {
@@ -130,7 +135,7 @@ public final class SelfDefenceBehavior extends Behavior {
         if (!ctx.player().onGround()) {
             return;
         }
-        ctx.playerController().attackEntity(ctx.player(), currentTarget);
+        attemptAttack(currentTarget, false, attackType, true);
     }
 
     @Override
@@ -242,10 +247,83 @@ public final class SelfDefenceBehavior extends Behavior {
             if (!weaponReady()) {
                 return;
             }
-            ctx.playerController().attackEntity(ctx.player(), currentTarget);
+            attemptAttack(currentTarget, true, currentAttackType, weaponReady());
             resetJumpState();
         }
     }
+
+    /**
+     * Records the attack so a miss (no damage applied) can be detected and logged
+     * over the following ticks.
+     */
+    private void attemptAttack(Mob target, boolean jumped, Settings.AttackType attackType, boolean weaponReadyState) {
+        Settings.AttackType type = attackType != null ? attackType : Baritone.settings().attackType.value;
+        Vec3 head = ctx.playerHead();
+        double distance = head.distanceTo(target.getEyePosition());
+        pendingAttack = new PendingAttack(
+                target,
+                target.getHealth(),
+                jumped,
+                type,
+                weaponReadyState,
+                distance,
+                ctx.player().position(),
+                tickCounter
+        );
+        ctx.playerController().attackEntity(ctx.player(), target);
+    }
+
+    private void checkPendingAttackResult() {
+        if (pendingAttack == null) {
+            return;
+        }
+        PendingAttack p = pendingAttack;
+        if (!p.target().isAlive()) {
+            pendingAttack = null; // killed (or died) - the hit landed
+            return;
+        }
+        if (p.target().getHealth() < p.healthBefore()) {
+            pendingAttack = null; // damage applied - the hit landed
+            return;
+        }
+        if (tickCounter - p.tick() > 4) {
+            pendingAttack = null;
+            logMiss(p);
+        }
+    }
+
+    private void logMiss(PendingAttack p) {
+        Vec3 pos = p.playerPos();
+        net.minecraft.resources.ResourceLocation targetKey = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(p.target().getType());
+        String line = String.format(
+                "MISS type=%s jumped=%s weaponReady=%s dist=%.2f pos=(%.1f,%.1f,%.1f) target=%s hp=%.1f->%.1f",
+                p.attackType(), p.jumped(), p.weaponReady(), p.distance(),
+                pos.x, pos.y, pos.z,
+                targetKey, p.healthBefore(), p.target().getHealth()
+        );
+        Helper.HELPER.logDirect("[SelfDefence] " + line);
+        try {
+            java.nio.file.Path logFile = ctx.minecraft().gameDirectory.toPath()
+                    .resolve("baritone").resolve("selfdefence-miss.log");
+            java.nio.file.Files.createDirectories(logFile.getParent());
+            java.nio.file.Files.writeString(logFile,
+                    java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")) + " " + line + System.lineSeparator(),
+                    java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
+        } catch (Exception e) {
+            Helper.HELPER.logDirect("[SelfDefence] failed to write miss log: " + e.getMessage());
+        }
+    }
+
+    private record PendingAttack(
+            Mob target,
+            float healthBefore,
+            boolean jumped,
+            Settings.AttackType attackType,
+            boolean weaponReady,
+            double distance,
+            Vec3 playerPos,
+            int tick
+    ) {}
 
     private boolean weaponReady() {
         return ctx.player().getAttackStrengthScale(0.5F) >= 0.98F;
@@ -365,6 +443,7 @@ public final class SelfDefenceBehavior extends Behavior {
         combatAnchor = null;
         currentTargetLastSeenTick = 0;
         recentThreatExpiry.clear();
+        pendingAttack = null;
         lastKnownHealth = Float.NaN;
         resetJumpState();
     }
