@@ -26,6 +26,8 @@ import baritone.utils.BaritoneProcessHelper;
 
 public final class SelfDefenceProcess extends BaritoneProcessHelper {
 
+    private Goal lastSentGoal;
+
     public SelfDefenceProcess(Baritone baritone) {
         super(baritone);
     }
@@ -46,6 +48,15 @@ public final class SelfDefenceProcess extends BaritoneProcessHelper {
         }
         Goal chaseGoal = behaviour.chaseGoal();
         if (chaseGoal != null) {
+            if (chaseGoal.equals(lastSentGoal)) {
+                // Goal unchanged since last request: keep the running path
+                // executor alive. Revalidating every tick would cancel+replan
+                // for a moving target (GoalNear differs each tick), so the bot
+                // would never actually walk. The behavior refreshes the goal
+                // every 15 ticks, which triggers a fresh REVALIDATE here.
+                return new PathingCommand(chaseGoal, PathingCommandType.SET_GOAL_AND_PATH);
+            }
+            lastSentGoal = chaseGoal;
             return new PathingCommand(chaseGoal, PathingCommandType.REVALIDATE_GOAL_AND_PATH);
         }
         return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
@@ -53,6 +64,7 @@ public final class SelfDefenceProcess extends BaritoneProcessHelper {
 
     @Override
     public void onLostControl() {
+        lastSentGoal = null;
     }
 
     @Override

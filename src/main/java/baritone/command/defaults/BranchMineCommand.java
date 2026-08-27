@@ -56,6 +56,20 @@ public class BranchMineCommand extends Command {
 
     @Override
     public Stream<String> tabComplete(String label, IArgConsumer args) throws CommandException {
+        if (!args.hasAny() || args.hasExactlyOne()) {
+            return CustomCommandCompleter.suggest(args,
+                    String.valueOf(Baritone.settings().branchMineMainLength.value), "32", "64", "128", "256");
+        }
+        args.get();
+        if (args.hasExactlyOne()) {
+            return CustomCommandCompleter.suggest(args,
+                    String.valueOf(Baritone.settings().branchMineSideLength.value), "8", "16", "32");
+        }
+        args.get();
+        if (args.hasExactlyOne()) {
+            return CustomCommandCompleter.suggest(args,
+                    String.valueOf(Baritone.settings().branchMineSpacing.value), "2", "3", "4");
+        }
         return Stream.empty();
     }
 

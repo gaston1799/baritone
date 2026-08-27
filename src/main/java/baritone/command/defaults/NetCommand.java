@@ -194,8 +194,15 @@ public class NetCommand extends Command {
 
     @Override
     public Stream<String> tabComplete(String label, IArgConsumer args) throws CommandException {
-        if (args.hasExactlyOne()) {
-            return SUBCOMMANDS.stream();
+        if (!args.hasAny() || args.hasExactlyOne()) {
+            return CustomCommandCompleter.suggest(args, SUBCOMMANDS.toArray(String[]::new));
+        }
+        String subcommand = args.getString().toLowerCase();
+        if ("send".equals(subcommand)) {
+            return baritone.getCommandManager().tabComplete(args.rawRest());
+        }
+        if ("host".equals(subcommand) && args.hasExactlyOne()) {
+            return CustomCommandCompleter.suggest(args, String.valueOf(BaritoneNetwork.DEFAULT_PORT));
         }
         return Stream.empty();
     }

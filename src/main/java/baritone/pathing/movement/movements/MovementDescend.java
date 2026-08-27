@@ -44,6 +44,7 @@ import java.util.Set;
 public class MovementDescend extends Movement {
 
     private int numTicks = 0;
+    private boolean completedByOvershoot;
     public boolean forceSafeMode = false;
 
     public MovementDescend(IBaritone baritone, BetterBlockPos start, BetterBlockPos end) {
@@ -54,7 +55,12 @@ public class MovementDescend extends Movement {
     public void reset() {
         super.reset();
         numTicks = 0;
+        completedByOvershoot = false;
         forceSafeMode = false;
+    }
+
+    public boolean completedByOvershoot() {
+        return completedByOvershoot;
     }
 
     /**
@@ -258,12 +264,29 @@ public class MovementDescend extends Movement {
 
         state.setInput(Input.SNEAK, Baritone.settings().allowWalkOnMagmaBlocks.value && ctx.world().getBlockState(ctx.player().blockPosition().below()).is(Blocks.MAGMA_BLOCK));
 
+        // dest.above() is a valid transient position for this movement, but it
+        // is not a completed descent. This happens when the player's feet have
+        // crossed onto the lip while their collision box is still supported by
+        // the upper block. Keep driving beyond the lip until gravity actually
+        // lowers the player's feet instead of accepting the position as an
+        // overshoot and replanning the same movement every tick.
+        if (needsEdgeClearance(playerFeet.getY(), dest.getY(), ctx.player().onGround())) {
+            if (numTicks++ % 20 == 0) {
+                CorrectionLogger.log("descend clear-edge: player " + playerFeet + " is still above dest "
+                        + dest + ", continuing toward " + fakeDest);
+            }
+            MovementHelper.moveTowards(ctx, state, fakeDest);
+            return state;
+        }
+
         if (!playerFeet.equals(dest) || ab > 0.25) {
             // Fast-fall overshoot: if the player has flown past the dest and is
             // back on solid ground, accept the overshoot as complete instead of
             // walking backward - the next movement picks up from here.
             boolean pastDest = ab < fromStart;
-            if (pastDest && ctx.player().onGround() && ctx.player().getDeltaMovement().y > -0.5D) {
+            if (shouldAcceptOvershoot(playerFeet.getY(), dest.getY(), pastDest,
+                    ctx.player().onGround(), ctx.player().getDeltaMovement().y)) {
+                completedByOvershoot = true;
                 CorrectionLogger.log("descend accept-overshoot: player " + ctx.playerFeet() + " past dest "
                         + dest + " (src " + src + "), continuing path");
                 return state.setStatus(MovementStatus.SUCCESS);
@@ -287,6 +310,18 @@ public class MovementDescend extends Movement {
                 false
         ));
         return state;
+    }
+
+    static boolean needsEdgeClearance(int playerFeetY, int destinationY, boolean onGround) {
+        return onGround && playerFeetY > destinationY;
+    }
+
+    static boolean shouldAcceptOvershoot(int playerFeetY, int destinationY, boolean pastDestination,
+                                         boolean onGround, double verticalVelocity) {
+        return pastDestination
+                && onGround
+                && playerFeetY <= destinationY
+                && verticalVelocity > -0.5D;
     }
 
     public boolean safeMode() {

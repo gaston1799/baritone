@@ -122,8 +122,26 @@ public class PathExecutor implements IPathExecutor, Helper {
             boolean passedDest = VecUtils.entityFlatDistanceToCenter(ctx.player(), movement.getDest())
                     < VecUtils.entityFlatDistanceToCenter(ctx.player(), movement.getSrc());
             if (passedDest) {
-                baritone.utils.CorrectionLogger.log("skip-rewind: player " + whereAmI + " is past dest of movement " + pathPosition
-                        + " (" + movement.getSrc() + "->" + movement.getDest() + "), fast-fall overshoot");
+                if (!ctx.player().onGround() && ctx.world().getFluidState(whereAmI).isEmpty()) {
+                    clearKeys();
+                    baritone.utils.CorrectionLogger.log("coast-forward: player " + whereAmI + " passed movement " + pathPosition
+                            + " while airborne; suppressing reverse correction");
+                    return false;
+                }
+                int forwardPosition = findForwardPathPosition(whereAmI, pathPosition + 1);
+                if (forwardPosition >= 0) {
+                    int previousPosition = pathPosition;
+                    pathPosition = forwardPosition;
+                    onChangeInPathPosition();
+                    clearKeys();
+                    baritone.utils.CorrectionLogger.log("snap-forward: pathPos " + previousPosition + "->" + forwardPosition
+                            + " player=" + whereAmI + " after fast overshoot");
+                    return false;
+                }
+                baritone.utils.CorrectionLogger.log("replan-forward: player " + whereAmI + " landed past movement " + pathPosition
+                        + " near the path; replanning without reverse input");
+                cancel("fast overshoot landed off exact path");
+                return false;
             } else {
                 for (int i = 0; i < pathPosition && i < path.length(); i++) {//this happens for example when you lag out and get teleported back a couple blocks
                     if (((Movement) path.movements().get(i)).getValidPositions().contains(whereAmI)) {
@@ -273,6 +291,22 @@ public class PathExecutor implements IPathExecutor, Helper {
             return true;
         }
         if (movementStatus == SUCCESS) {
+            if (movement instanceof MovementDescend && ((MovementDescend) movement).completedByOvershoot()) {
+                int previousPosition = pathPosition;
+                int forwardPosition = findForwardPathPosition(ctx.playerFeet(), pathPosition + 1);
+                if (forwardPosition >= 0) {
+                    pathPosition = forwardPosition;
+                    onChangeInPathPosition();
+                    clearKeys();
+                    baritone.utils.CorrectionLogger.log("descend snap-forward: pathPos " + previousPosition + "->" + forwardPosition
+                            + " player=" + ctx.playerFeet());
+                    return true;
+                }
+                baritone.utils.CorrectionLogger.log("descend replan-forward: player " + ctx.playerFeet()
+                        + " completed movement " + pathPosition + " past its landing; replanning from actual feet");
+                cancel("descend overshoot requires forward replan");
+                return true;
+            }
             //System.out.println("Movement done, next path");
             pathPosition++;
             onChangeInPathPosition();
@@ -347,6 +381,16 @@ public class PathExecutor implements IPathExecutor, Helper {
             }
         }
         return new Tuple<>(best, bestPos);
+    }
+
+    private int findForwardPathPosition(BetterBlockPos position, int firstPosition) {
+        List<BetterBlockPos> positions = path.positions();
+        for (int i = Math.max(0, firstPosition); i < positions.size(); i++) {
+            if (positions.get(i).equals(position)) {
+                return Math.min(i, path.movements().size());
+            }
+        }
+        return -1;
     }
 
     private boolean shouldPause() {

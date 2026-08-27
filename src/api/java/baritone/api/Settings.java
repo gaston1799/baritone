@@ -209,11 +209,82 @@ public final class Settings {
     public final Setting<Boolean> selfDefenceStrafe = new Setting<>(true);
 
     /**
+     * Use the predictive combat movement planner for melee spacing, approach,
+     * retreat and strafing. When disabled, the legacy fixed strafe/kite logic
+     * is used.
+     */
+    public final Setting<Boolean> selfDefenceCombatMovement = new Setting<>(true);
+
+    /**
+     * Number of future ticks evaluated for each combat movement candidate.
+     * Values are clamped to 2 through 20 at runtime.
+     */
+    public final Setting<Integer> selfDefenceCombatPredictionTicks = new Setting<>(8);
+
+    /**
+     * Desired target distance when the weapon is ready to attack.
+     */
+    public final Setting<Double> selfDefenceCombatAttackDistance = new Setting<>(2.35D);
+
+    /**
+     * Maximum distance at which direct combat movement takes control from the
+     * ordinary pathing chase.
+     */
+    public final Setting<Double> selfDefenceCombatControlDistance = new Setting<>(4.5D);
+
+    /**
+     * Render the combat movement candidates. The selected move is green,
+     * alternatives are yellow, blocked/unsafe candidates are red, and the
+     * predicted target position is cyan.
+     */
+    public final Setting<Boolean> selfDefenceRenderCombatMovement = new Setting<>(true);
+
+    /**
+     * Write bounded structured combat failure traces to
+     * baritone/combat-failures.jsonl and retain the latest traces in memory for
+     * the lastfail command.
+     */
+    public final Setting<Boolean> selfDefenceFailureLog = new Setting<>(true);
+
+    /**
+     * Number of ticks retained before a combat failure. Values are clamped to
+     * 20 through 200 at runtime.
+     */
+    public final Setting<Integer> selfDefenceFailureFrames = new Setting<>(80);
+
+    /**
+     * Append a human-readable narrative to baritone/selfdefence.log covering
+     * combat decision changes (move picked, score, distance, fallbacks), chase
+     * start/stop and goal refreshes, and every attack outcome. The structured
+     * JSONL traces in combat-failures.jsonl remain the source for deep
+     * analysis; this file is for quickly scanning a fight.
+     */
+    public final Setting<Boolean> selfDefenceNarrativeLog = new Setting<>(true);
+
+    /**
      * Allow smash-diving creepers when the bot has the mace + elytra + firework
      * escape kit (smash, then rocket straight up before the fuse pops). When
      * false, creepers are always avoided.
      */
     public final Setting<Boolean> selfDefenceCreeperDive = new Setting<>(true);
+
+    /**
+     * Vertical distance that the powered Elytra mace attack tries to gain
+     * before stowing the Elytra and beginning its smash dive.
+     */
+    public final Setting<Double> selfDefenceMaceClimbHeight = new Setting<>(8.0D);
+
+    /**
+     * Look pitch used for the initial and post-smash firework climbs. Negative
+     * values point upward; values are clamped to -89 through -20 at runtime.
+     */
+    public final Setting<Double> selfDefenceMaceClimbPitch = new Setting<>(-70.0D);
+
+    /**
+     * Maximum powered-climb duration before committing to the dive, even if
+     * the configured height has not been reached.
+     */
+    public final Setting<Integer> selfDefenceMaceClimbMaxTicks = new Setting<>(30);
 
     /**
      * Allow Baritone to place blocks

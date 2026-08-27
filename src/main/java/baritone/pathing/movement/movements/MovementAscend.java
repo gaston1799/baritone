@@ -29,6 +29,8 @@ import baritone.pathing.movement.MovementState;
 import baritone.utils.BlockStateInterface;
 import baritone.api.utils.RotationUtils;
 import baritone.api.utils.VecUtils;
+import baritone.pathing.movement.JumpTrajectory;
+import baritone.utils.CorrectionLogger;
 import com.google.common.collect.ImmutableSet;
 import java.util.Set;
 import net.minecraft.core.Direction;
@@ -39,6 +41,10 @@ import net.minecraft.world.level.block.state.BlockState;
 public class MovementAscend extends Movement {
 
     private int ticksWithoutPlacement = 0;
+    private String lastTakeoffFailMsg = "";
+    private long lastTakeoffFailMs = 0;
+    private String lastTakeoffCommitMsg = "";
+    private long lastTakeoffCommitMs = 0;
 
     public MovementAscend(IBaritone baritone, BetterBlockPos src, BetterBlockPos dest) {
         super(
@@ -58,6 +64,8 @@ public class MovementAscend extends Movement {
     public void reset() {
         super.reset();
         ticksWithoutPlacement = 0;
+        lastTakeoffFailMsg = "";
+        lastTakeoffCommitMsg = "";
     }
 
     @Override
@@ -191,10 +199,18 @@ public class MovementAscend extends Movement {
         BlockState jumpingOnto = BlockStateInterface.get(ctx, positionToPlace);
         if (!MovementHelper.canWalkOn(ctx, positionToPlace, jumpingOnto)) {
             ticksWithoutPlacement++;
-            if (MovementHelper.attemptToPlaceABlock(state, baritone, dest.below(), false, true) == PlaceResult.READY_TO_PLACE) {
+            PlaceResult placeResult = MovementHelper.attemptToPlaceABlock(state, baritone, dest.below(), false, true);
+            CorrectionLogger.logAlways("ascend-place-gate movement=" + src + "->" + dest
+                    + " placeAt=" + dest.below() + " result=" + placeResult
+                    + " crouching=" + ctx.player().isCrouching()
+                    + " onGround=" + ctx.player().onGround()
+                    + " tick=" + ticksWithoutPlacement);
+            if (placeResult == PlaceResult.READY_TO_PLACE) {
                 state.setInput(Input.SNEAK, true);
                 if (ctx.player().isCrouching()) {
                     state.setInput(Input.CLICK_RIGHT, true);
+                } else {
+                    CorrectionLogger.logAlways("ascend-place-gate clickRight=false reason=not-yet-crouching");
                 }
             }
             if (ticksWithoutPlacement > 10) {
@@ -227,11 +243,10 @@ public class MovementAscend extends Movement {
             return state;
         }
 
-        // Forward walk-ahead: simulate the sprint-boosted jump from the current
-        // position toward the dest and jump the moment the arc would clear the
-        // step without bonking. Re-run every tick so the takeoff point is
-        // continuously corrected as the player approaches (fixes "not jumping").
-        if (sideDist > 0.2 || !MovementHelper.jumpClearsAscend(ctx, src, dest)) {
+        // Forward walk-ahead: simulate the jump using the player's actual
+        // movement state. MovementAscend does not request sprint, so a normal
+        // ascend must not be simulated as a sprint jump and committed early.
+        if (sideDist > 0.2) {
             // not ready yet - keep walking; look up toward the step so the bot
             // appears to be scanning the ascent
             state.setTarget(new MovementState.MovementTarget(
@@ -241,8 +256,73 @@ public class MovementAscend extends Movement {
             return state;
         }
 
+        JumpTrajectory takeoff = MovementHelper.planAscendAt(
+                ctx,
+                src,
+                dest,
+                state.getInputStates().getOrDefault(Input.SPRINT, false)
+        );
+        if (!takeoff.reachesTarget()) {
+            // Reached the takeoff block but the simulated jump does not clear
+            // the step. This is an ACTION failure (not a planner failure): log
+            // exactly where and why so it can be diagnosed from corrections.log.
+            logTakeoffFailure(takeoff, sideDist, flatDistToNext, lateralMotion);
+            // keep walking and re-evaluate next tick
+            state.setTarget(new MovementState.MovementTarget(
+                    RotationUtils.calcRotationFromVec3d(ctx.playerHead(), VecUtils.getBlockPosCenter(dest), ctx.playerRotations()),
+                    false
+            ));
+            return state;
+        }
+
+        logTakeoffCommit(takeoff, sideDist, flatDistToNext);
+
         // Once we are pointing the right way and moving, start jumping
         return state.setInput(Input.JUMP, true);
+    }
+
+    /**
+     * Logs a failed takeoff: the bot reached the step (sideDist &lt;= 0.2) but the
+     * simulated jump could not clear it. Throttled: identical messages repeat
+     * at most once per 4s (persistence signal), changed messages as they occur.
+     */
+    private void logTakeoffFailure(JumpTrajectory trajectory, double sideDist, double flatDistToNext, double lateralMotion) {
+        long now = System.currentTimeMillis();
+        if (now - lastTakeoffFailMs < 250) {
+            return;
+        }
+        String msg = String.format(java.util.Locale.US,
+                "ascend takeoff FAIL: src=(%d,%d,%d) dest=(%d,%d,%d) player=(%.2f,%.2f,%.2f) side=%.2f flat=%.2f lateral=%.2f outcome=%s landingError=%.2f",
+                src.getX(), src.getY(), src.getZ(),
+                dest.getX(), dest.getY(), dest.getZ(),
+                ctx.player().position().x, ctx.player().position().y, ctx.player().position().z,
+                sideDist, flatDistToNext, lateralMotion,
+                trajectory == null ? "unknown" : trajectory.outcome().name(),
+                trajectory == null ? Double.NaN : trajectory.landingError());
+        if (msg.equals(lastTakeoffFailMsg) && now - lastTakeoffFailMs < 4000) {
+            return;
+        }
+        lastTakeoffFailMsg = msg;
+        lastTakeoffFailMs = now;
+        CorrectionLogger.log(msg);
+    }
+
+    /**
+     * Logs the jump commit (takeoff cleared) once per takeoff attempt.
+     */
+    private void logTakeoffCommit(JumpTrajectory trajectory, double sideDist, double flatDistToNext) {
+        String msg = String.format(java.util.Locale.US,
+                "ascend takeoff OK: dest=(%d,%d,%d) side=%.2f flat=%.2f outcome=%s landingError=%.2f",
+                dest.getX(), dest.getY(), dest.getZ(), sideDist, flatDistToNext,
+                trajectory == null ? "unknown" : trajectory.outcome().name(),
+                trajectory == null ? Double.NaN : trajectory.landingError());
+        long now = System.currentTimeMillis();
+        if (msg.equals(lastTakeoffCommitMsg) && now - lastTakeoffCommitMs < 4000) {
+            return;
+        }
+        lastTakeoffCommitMsg = msg;
+        lastTakeoffCommitMs = now;
+        CorrectionLogger.log(msg);
     }
 
     public boolean headBonkClear() {
@@ -259,7 +339,10 @@ public class MovementAscend extends Movement {
 
     @Override
     public boolean safeToCancel(MovementState state) {
-        // if we had to place, don't allow pause
-        return state.getStatus() != MovementStatus.RUNNING || ticksWithoutPlacement == 0;
+        // Once a simulated takeoff is committed (or the player is already in
+        // flight), path reconciliation must not rewind and create a backward
+        // correction flick. Reconcile only after landing or completion.
+        return state.getStatus() != MovementStatus.RUNNING
+                || (ticksWithoutPlacement == 0 && ctx.player().onGround());
     }
 }

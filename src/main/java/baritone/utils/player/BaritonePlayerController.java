@@ -85,9 +85,11 @@ public final class BaritonePlayerController implements IPlayerController {
 
     @Override
     public InteractionResult processRightClickBlock(LocalPlayer player, Level world, InteractionHand hand, BlockHitResult result) {
-        faceTowards(result.getLocation().x, result.getLocation().y, result.getLocation().z);
         // primaryplayercontroller is always in a ClientWorld so this is ok
-        return mc.gameMode.useItemOn(player, hand, result);
+        InteractionResult interactionResult = mc.gameMode.useItemOn(player, hand, result);
+        baritone.utils.CorrectionLogger.logAlways("controller-gates useItemOn hand=" + hand + " hit=" + result.getBlockPos() + "/" + result.getDirection()
+                + " playerRot=" + player.getYRot() + "," + player.getXRot() + " result=" + interactionResult);
+        return interactionResult;
     }
 
     @Override
@@ -97,36 +99,13 @@ public final class BaritonePlayerController implements IPlayerController {
 
     @Override
     public void attackEntity(LocalPlayer player, Entity target) {
-        faceTowards(target.getX(), target.getY() + target.getEyeHeight() / 2.0D, target.getZ());
         mc.gameMode.attack(player, target);
         player.swing(InteractionHand.MAIN_HAND);
     }
 
     @Override
     public boolean clickBlock(BlockPos loc, Direction face) {
-        faceTowards(loc.getX() + 0.5D, loc.getY() + 0.5D, loc.getZ() + 0.5D);
         return mc.gameMode.startDestroyBlock(loc, face);
-    }
-
-    /**
-     * Freecam compat: mods like MrCrayfish's Freecam overwrite the player's
-     * rotation every tick (syncing it to the detached camera), which breaks
-     * baritone's aim for place/attack/break. Re-assert the look toward the
-     * interaction target right before the interaction so the vanilla call sees
-     * baritone's rotation even if it gets clobbered afterwards.
-     */
-    private void faceTowards(double x, double y, double z) {
-        LocalPlayer player = mc.player;
-        if (player == null) {
-            return;
-        }
-        baritone.api.utils.Rotation rotation = baritone.api.utils.RotationUtils.calcRotationFromVec3d(
-                player.getEyePosition(),
-                new net.minecraft.world.phys.Vec3(x, y, z),
-                new baritone.api.utils.Rotation(player.getYRot(), player.getXRot())
-        );
-        player.setYRot(rotation.getYaw());
-        player.setXRot(rotation.getPitch());
     }
 
     @Override

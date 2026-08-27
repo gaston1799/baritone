@@ -36,32 +36,61 @@ public class BlockPlaceHelper {
     }
 
     public void tick(boolean rightClickRequested) {
+        tick(rightClickRequested, null);
+    }
+
+    public void tick(boolean rightClickRequested, BlockHitResult validatedHit) {
         if (rightClickTimer > 0) {
+            CorrectionLogger.logAlways("place-gates requested=" + rightClickRequested
+                    + " timer=" + rightClickTimer + " result=WAIT_TIMER");
             rightClickTimer--;
             return;
         }
         if (!rightClickRequested || ctx.player().isHandsBusy()) {
+            CorrectionLogger.logAlways("place-gates requested=" + rightClickRequested
+                    + " timer=0 handsBusy=" + ctx.player().isHandsBusy() + " result=SKIP");
             return;
         }
         if (ctx.player().canEat(false) && ctx.player().getMainHandItem().get(net.minecraft.core.component.DataComponents.FOOD) != null) {
             rightClickTimer = Baritone.settings().rightClickSpeed.value - BASE_PLACE_DELAY;
+            CorrectionLogger.logAlways("place-gates result=FOOD_USE timer=" + rightClickTimer);
             ctx.playerController().syncHeldItem();
             ctx.playerController().processRightClick(ctx.player(), ctx.world(), InteractionHand.MAIN_HAND);
             return;
         }
-        HitResult mouseOver = ctx.objectMouseOver();
+        HitResult mouseOver = validatedHit != null ? validatedHit : ctx.objectMouseOver();
         if (mouseOver == null || mouseOver.getType() != HitResult.Type.BLOCK) {
+            CorrectionLogger.logAlways("place-gates requested=true timer=0 mouseOver="
+                    + (mouseOver == null ? "null" : mouseOver.getType()) + " result=NO_BLOCK_HIT");
             return;
         }
         rightClickTimer = Baritone.settings().rightClickSpeed.value - BASE_PLACE_DELAY;
+        CorrectionLogger.logAlways("place-gates requested=true handsBusy=false canEat=false mouseOver=BLOCK hit="
+                + ((BlockHitResult) mouseOver).getBlockPos() + "/" + ((BlockHitResult) mouseOver).getDirection()
+                + " playerRot=" + ctx.player().getYRot() + "," + ctx.player().getXRot()
+                + " timer=" + rightClickTimer + " result=TRY_HANDS");
         for (InteractionHand hand : InteractionHand.values()) {
-            if (ctx.playerController().processRightClickBlock(ctx.player(), ctx.world(), hand, (BlockHitResult) mouseOver) == InteractionResult.SUCCESS) {
+            InteractionResult blockResult = ctx.playerController().processRightClickBlock(
+                    ctx.player(), ctx.world(), hand, (BlockHitResult) mouseOver);
+            CorrectionLogger.logAlways("place-gates hand=" + hand + " useItemOn=" + blockResult
+                    + " consumes=" + blockResult.consumesAction()
+                    + " identitySuccess=" + (blockResult == InteractionResult.SUCCESS));
+            if (blockResult.consumesAction()) {
                 ctx.player().swing(hand);
                 return;
             }
-            if (!ctx.player().getItemInHand(hand).isEmpty() && ctx.playerController().processRightClick(ctx.player(), ctx.world(), hand) == InteractionResult.SUCCESS) {
-                return;
+            if (!ctx.player().getItemInHand(hand).isEmpty()) {
+                InteractionResult itemResult = ctx.playerController().processRightClick(ctx.player(), ctx.world(), hand);
+                CorrectionLogger.logAlways("place-gates hand=" + hand + " useItem=" + itemResult
+                        + " consumes=" + itemResult.consumesAction()
+                        + " identitySuccess=" + (itemResult == InteractionResult.SUCCESS));
+                if (itemResult.consumesAction()) {
+                    return;
+                }
+            } else {
+                CorrectionLogger.logAlways("place-gates hand=" + hand + " useItem=SKIP_EMPTY_HAND");
             }
         }
+        CorrectionLogger.logAlways("place-gates result=NO_HAND_CONSUMED");
     }
 }

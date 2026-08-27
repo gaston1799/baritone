@@ -106,6 +106,12 @@ public final class InventoryBehavior extends Behavior implements Helper {
         if (autoTotem()) {
             return;
         }
+        if (baritone.getSelfDefenceBehavior().isMaceDiveActive()) {
+            // The mace controller temporarily owns the chest slot while it
+            // stows/restores the Elytra. Auto-armor must not fill that slot or
+            // move the saved Elytra in the middle of a dive.
+            return;
+        }
         if (autoArmor()) {
             return;
         }

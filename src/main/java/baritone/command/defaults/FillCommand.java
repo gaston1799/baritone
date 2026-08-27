@@ -80,15 +80,16 @@ public class FillCommand extends Command {
 
     @Override
     public Stream<String> tabComplete(String label, IArgConsumer args) throws CommandException {
-        // Skip up to 6 coordinate arguments, then complete the block name
-        for (int i = 0; i < 6 && args.has(2); i++) {
-            if (args.peekDatatypeOrNull(RelativeCoordinate.INSTANCE) != null) {
-                args.get();
-            } else {
-                return Stream.empty();
+        for (int i = 0; i < 6; i++) {
+            if (!args.hasAny() || args.hasExactlyOne()) {
+                return args.tabCompleteDatatype(RelativeCoordinate.INSTANCE);
             }
+            if (args.peekDatatypeOrNull(RelativeCoordinate.INSTANCE) == null) {
+                return args.tabCompleteDatatype(RelativeCoordinate.INSTANCE);
+            }
+            args.get();
         }
-        if (args.hasAny()) {
+        if (args.hasExactlyOne()) {
             return args.tabCompleteDatatype(ForBlockOptionalMeta.INSTANCE);
         }
         return Stream.empty();

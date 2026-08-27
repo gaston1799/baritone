@@ -36,7 +36,9 @@ import baritone.pathing.path.PathExecutor;
 import baritone.process.ElytraProcess;
 import baritone.utils.PathRenderer;
 import baritone.utils.PathingCommandContext;
+import baritone.utils.CorrectionLogger;
 import baritone.utils.pathing.Favoring;
+import baritone.api.utils.input.Input;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Objects;
@@ -336,7 +338,13 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
 
     public boolean cancelSegmentIfSafe() {
         if (isSafeToCancel()) {
+            boolean rightBefore = baritone.getInputOverrideHandler().isInputForcedDown(Input.CLICK_RIGHT);
             secretInternalSegmentCancel();
+            boolean rightAfter = baritone.getInputOverrideHandler().isInputForcedDown(Input.CLICK_RIGHT);
+            if (rightBefore || rightAfter) {
+                CorrectionLogger.logAlways("path-cancel-safe rightBefore=" + rightBefore
+                        + " rightAfter=" + rightAfter + " current=" + (current != null));
+            }
             return true;
         }
         return false;

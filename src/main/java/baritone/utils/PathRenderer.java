@@ -35,11 +35,14 @@ import baritone.api.utils.interfaces.IGoalRenderPos;
 import baritone.behavior.PathingBehavior;
 import baritone.command.defaults.TempPathCommand;
 import baritone.pathing.movement.MovementHelper;
+import baritone.pathing.movement.JumpTrajectory;
+import baritone.pathing.movement.JumpTrajectoryTrace;
 import baritone.pathing.movement.movements.AscendDebugInfo;
 import baritone.pathing.movement.movements.AscendDebugTrace;
 import baritone.pathing.movement.movements.ParkourDebugInfo;
 import baritone.pathing.movement.movements.ParkourDebuggable;
 import baritone.pathing.path.PathExecutor;
+import baritone.process.BuilderProcess;
 import baritone.process.StripmineProcess;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -349,7 +352,13 @@ public final class PathRenderer implements IRenderer {
         } else {
             y = Mth.cos((float) (((float) ((System.nanoTime() / 100000L) % 20000L)) / 20000F * Math.PI * 2));
         }
-        if (goal instanceof IGoalRenderPos) {
+        if (goal instanceof BuilderProcess.JankyGoalComposite janky) {
+            // Builder goals use this wrapper to prefer placement while keeping
+            // breaking as a fallback. Render both nested goals; the wrapper
+            // itself has no single block position to render.
+            drawGoal(stack, ctx, janky.primary(), partialTicks, color, setupRender);
+            drawGoal(stack, ctx, janky.fallback(), partialTicks, color, setupRender);
+        } else if (goal instanceof IGoalRenderPos) {
             BlockPos goalPos = ((IGoalRenderPos) goal).getGoalPos();
             minX = goalPos.getX() + 0.002 - renderPosX;
             maxX = goalPos.getX() + 1 - 0.002 - renderPosX;
@@ -451,6 +460,11 @@ public final class PathRenderer implements IRenderer {
         if (ctx.player() == null) {
             return;
         }
+        JumpTrajectory simulated = JumpTrajectoryTrace.current();
+        if (simulated != null) {
+            renderSimulatedJumpArc(stack, simulated);
+            return;
+        }
         Vec3 pos = ctx.player().position();
         Vec3 vel = ctx.player().getDeltaMovement();
         double jumpPower = baritone.pathing.movement.MovementHelper.playerJumpPower(ctx);
@@ -506,6 +520,47 @@ public final class PathRenderer implements IRenderer {
             IRenderer.emitAABB(stack, new AABB(Mth.floor(px), Mth.floor(py), Mth.floor(pz), Mth.floor(px) + 1, Mth.floor(py) + 1, Mth.floor(pz) + 1));
             IRenderer.endLines(true);
         }
+    }
+
+    private static void renderSimulatedJumpArc(PoseStack stack, JumpTrajectory trajectory) {
+        Color arcColor;
+        switch (trajectory.outcome()) {
+            case TARGET:
+                arcColor = new Color(0, 255, 120);
+                break;
+            case SHORT:
+                arcColor = new Color(255, 190, 0);
+                break;
+            case OVERSHOOT:
+                arcColor = new Color(255, 80, 40);
+                break;
+            case BLOCKED:
+            case NO_JUMP_POWER:
+            default:
+                arcColor = new Color(255, 40, 80);
+                break;
+        }
+        List<Vec3> samples = trajectory.samples();
+        IRenderer.startLines(arcColor, 0.85F, settings.pathRenderLineWidthPixels.value, true);
+        for (int i = 1; i < samples.size(); i++) {
+            Vec3 previous = samples.get(i - 1);
+            Vec3 current = samples.get(i);
+            IRenderer.emitLine(stack, previous.x, previous.y, previous.z, current.x, current.y, current.z);
+        }
+        IRenderer.endLines(true);
+
+        BetterBlockPos target = trajectory.target();
+        IRenderer.startLines(trajectory.reachesTarget() ? Color.GREEN : Color.RED, 0.9F, settings.pathRenderLineWidthPixels.value, true);
+        IRenderer.emitAABB(stack, new AABB(
+                target.getX(), target.getY() - 0.02D, target.getZ(),
+                target.getX() + 1.0D, target.getY() + 0.08D, target.getZ() + 1.0D
+        ));
+        Vec3 landing = trajectory.landing();
+        IRenderer.emitAABB(stack, new AABB(
+                landing.x - 0.08D, landing.y - 0.08D, landing.z - 0.08D,
+                landing.x + 0.08D, landing.y + 0.08D, landing.z + 0.08D
+        ));
+        IRenderer.endLines(true);
     }
 
     private static void drawDankLitGoalBox(PoseStack stack, Color color, double minX, double maxX, double minZ, double maxZ, double minY, double maxY, double y1, double y2, boolean setupRender) {

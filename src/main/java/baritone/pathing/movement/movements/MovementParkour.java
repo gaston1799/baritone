@@ -27,10 +27,13 @@ import baritone.api.utils.RotationUtils;
 import baritone.api.utils.input.Input;
 import baritone.api.utils.VecUtils;
 import baritone.pathing.movement.CalculationContext;
+import baritone.pathing.movement.JumpTrajectory;
+import baritone.pathing.movement.JumpTrajectoryTrace;
 import baritone.pathing.movement.Movement;
 import baritone.pathing.movement.MovementHelper;
 import baritone.pathing.movement.MovementState;
 import baritone.utils.BlockStateInterface;
+import baritone.utils.CorrectionLogger;
 import baritone.utils.pathing.MutableMoveResult;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.AABB;
@@ -64,6 +67,9 @@ public class MovementParkour extends Movement implements ParkourDebuggable {
     private final int runwayBack;
     private boolean takeoffWindowStarted;
     private int takeoffWindowTicks;
+    private JumpTrajectory takeoffPlan;
+    private int takeoffPlanTick;
+    private float takeoffYaw;
 
     private enum TakeoffProfile {
         JAM(0),
@@ -90,6 +96,9 @@ public class MovementParkour extends Movement implements ParkourDebuggable {
         super.reset();
         takeoffWindowStarted = false;
         takeoffWindowTicks = 0;
+        takeoffPlan = null;
+        takeoffPlanTick = 0;
+        takeoffYaw = 0.0F;
     }
 
     public static MovementParkour cost(CalculationContext context, BetterBlockPos src, Direction direction) {
@@ -502,6 +511,16 @@ public class MovementParkour extends Movement implements ParkourDebuggable {
             if (ctx.player().position().y - ctx.playerFeet().getY() < 0.094) { // lilypads
                 state.setStatus(MovementStatus.SUCCESS);
             }
+        } else if (takeoffPlan != null) {
+            if (ctx.player().onGround() && takeoffPlanTick > 1) {
+                // The committed forecast missed. Do not turn around and flick back
+                // toward the takeoff block; fail cleanly and let the pathfinder
+                // produce a new route from the actual landing position.
+                return state.setStatus(MovementStatus.UNREACHABLE);
+            }
+            applyCommittedTrajectory(state);
+        } else if (supportsTrajectoryPlanning() && ctx.player().onGround() && ctx.playerFeet().equals(src)) {
+            handleSimulatedTakeoff(state);
         } else if (hasIceRunway()) {
             if (isInTakeoffWindow(takeoffProgress())) {
                 handleTakeoffInputs(state);
@@ -521,16 +540,88 @@ public class MovementParkour extends Movement implements ParkourDebuggable {
         return state;
     }
 
+    private boolean supportsTrajectoryPlanning() {
+        return !isClimbableDestination() && MovementHelper.canWalkOn(ctx, dest.below());
+    }
+
+    private void handleSimulatedTakeoff(MovementState state) {
+        JumpTrajectory candidate = MovementHelper.planJump(
+                ctx,
+                dest,
+                state.getInputStates().getOrDefault(Input.SPRINT, false)
+        );
+        clearTrajectoryMovementInputs(state);
+        if (candidate != null && candidate.reachesTarget()) {
+            takeoffPlan = candidate;
+            takeoffPlanTick = 0;
+            takeoffYaw = landingCommitYaw();
+            applyCommittedTrajectory(state);
+            return;
+        }
+
+        // A short forecast improves as we approach the edge. If even maximum
+        // air-braking still overshoots, bleed speed without reversing the view.
+        if (candidate != null && candidate.outcome() == JumpTrajectory.Outcome.OVERSHOOT) {
+            state.setInput(Input.SPRINT, false);
+            MovementHelper.moveTowardsWithoutRotation(ctx, state, takeoffYawForDirection() + 180.0F);
+        } else {
+            state.setInput(Input.MOVE_FORWARD, true);
+        }
+    }
+
+    private void applyCommittedTrajectory(MovementState state) {
+        JumpTrajectoryTrace.publish(takeoffPlan);
+        clearTrajectoryMovementInputs(state);
+        Rotation committedRotation = new Rotation(takeoffYaw, ctx.playerRotations().getPitch());
+        state.setTarget(new MovementState.MovementTarget(committedRotation, true));
+        if (ctx.player().onGround()) {
+            state.setInput(Input.JUMP, true);
+        }
+        JumpTrajectory.Control control = takeoffPlan.controls().atTick(takeoffPlanTick++);
+        switch (control) {
+            case FORWARD:
+                MovementHelper.moveTowardsWithoutRotation(ctx, state, takeoffYaw);
+                break;
+            case BACK:
+                MovementHelper.moveTowardsWithoutRotation(ctx, state, takeoffYaw + 180.0F);
+                break;
+            case COAST:
+            default:
+                break;
+        }
+    }
+
+    private void clearTrajectoryMovementInputs(MovementState state) {
+        state.setInput(Input.MOVE_FORWARD, false);
+        state.setInput(Input.MOVE_BACK, false);
+        state.setInput(Input.MOVE_LEFT, false);
+        state.setInput(Input.MOVE_RIGHT, false);
+    }
+
+    private float takeoffYawForDirection() {
+        return RotationUtils.calcRotationFromVec3d(
+                ctx.playerHead(),
+                VecUtils.getBlockPosCenter(dest),
+                ctx.playerRotations()
+        ).getYaw();
+    }
+
     private void handleTakeoffInputs(MovementState state) {
+        PlaceResult placeResult = PlaceResult.NO_OPTION;
         if (!isClimbableDestination()
                 && Baritone.settings().allowPlace.value // see PR #3775
                 && ((Baritone) baritone).getInventoryBehavior().hasGenericThrowaway()
                 && !MovementHelper.canWalkOn(ctx, dest.below())
                 && !ctx.player().onGround()
-                && MovementHelper.attemptToPlaceABlock(state, baritone, dest.below(), true, false) == PlaceResult.READY_TO_PLACE
+                && (placeResult = MovementHelper.attemptToPlaceABlock(state, baritone, dest.below(), true, false)) == PlaceResult.READY_TO_PLACE
         ) {
             // go in the opposite order to check DOWN before all horizontals -- down is preferable because you don't have to look to the side while in midair, which could mess up the trajectory
             state.setInput(Input.CLICK_RIGHT, true);
+        }
+        if (placeResult != PlaceResult.NO_OPTION) {
+            CorrectionLogger.logAlways("parkour-place-gate movement=" + src + "->" + dest
+                    + " placeAt=" + dest.below() + " result=" + placeResult
+                    + " onGround=" + ctx.player().onGround());
         }
         if (shouldPressJumpThisTick()) {
             state.setInput(Input.JUMP, true);
@@ -886,7 +977,7 @@ public class MovementParkour extends Movement implements ParkourDebuggable {
                 parkourAimPoint(),
                 VecUtils.getBlockPosCenter(dest),
                 thresholdPoint,
-                shouldCommitTakeoffDirection(),
+                takeoffPlan != null || shouldCommitTakeoffDirection(),
                 parkourWindowOpen()
         );
     }

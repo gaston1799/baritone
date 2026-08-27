@@ -140,27 +140,41 @@ public class BridgeCommand extends Command {
 
     @Override
     public Stream<String> tabComplete(String label, IArgConsumer args) throws CommandException {
-        if (!args.hasAny()) return Stream.empty();
-        args.get(); // skip length
-        if (!args.hasAny()) return Stream.empty();
-        // skip width if it's a plain integer
+        if (!args.hasAny() || args.hasExactlyOne()) {
+            return CustomCommandCompleter.suggest(args, "8", "16", "32", "64", "128");
+        }
+        args.get(); // completed length
+        if (args.hasExactlyOne()) {
+            return Stream.concat(
+                    CustomCommandCompleter.suggest(args, "1", "2", "3", "5"),
+                    args.tabCompleteDatatype(ForBlockOptionalMeta.INSTANCE)
+            ).distinct();
+        }
+
+        boolean widthPresent = false;
         try {
             Integer.parseInt(args.peek().getValue());
             args.get();
-        } catch (NumberFormatException ignored) {}
-        if (!args.hasAny()) return Stream.empty();
-        // Tab-complete the block arg; also mix in visible player names for the 4th slot
-        if (args.has(2)) {
-            // Still on block arg
+            widthPresent = true;
+        } catch (NumberFormatException ignored) {
+        }
+
+        if (widthPresent && args.hasExactlyOne()) {
             return args.tabCompleteDatatype(ForBlockOptionalMeta.INSTANCE);
         }
-        // Last arg — could be block (if width was skipped) or player name (if block already given)
-        String partial = args.peek().getValue().toLowerCase();
-        Stream<String> blocks  = args.tabCompleteDatatype(ForBlockOptionalMeta.INSTANCE);
-        Stream<String> players = ctx.world().players().stream()
-                .map(p -> p.getName().getString())
-                .filter(n -> n.toLowerCase().startsWith(partial));
-        return Stream.concat(blocks, players);
+
+        if (!widthPresent) {
+            args.get(); // completed block in the optional-width form
+        } else if (args.has(2)) {
+            args.get(); // completed block after width
+        }
+        if (args.hasExactlyOne()) {
+            String partial = args.peekString().toLowerCase(java.util.Locale.US);
+            return ctx.world().players().stream()
+                    .map(player -> player.getName().getString())
+                    .filter(name -> name.toLowerCase(java.util.Locale.US).startsWith(partial));
+        }
+        return Stream.empty();
     }
 
     @Override

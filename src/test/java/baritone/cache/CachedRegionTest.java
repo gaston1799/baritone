@@ -20,6 +20,8 @@ package baritone.cache;
 import org.junit.Test;
 
 import static junit.framework.TestCase.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class CachedRegionTest {
 
@@ -43,5 +45,16 @@ public class CachedRegionTest {
                 }
             }
         }
+    }
+
+    @Test
+    public void incompleteOverviewIsNeverWritten() {
+        assertFalse(CachedRegion.isCompleteOverview(null));
+        assertFalse(CachedRegion.isCompleteOverview(new Object[255]));
+        assertFalse(CachedRegion.isCompleteOverview(new Object[256]));
+
+        Object[] complete = new Object[256];
+        java.util.Arrays.fill(complete, new Object());
+        assertTrue(CachedRegion.isCompleteOverview(complete));
     }
 }

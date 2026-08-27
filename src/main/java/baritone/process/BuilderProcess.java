@@ -40,6 +40,7 @@ import baritone.pathing.movement.Movement;
 import baritone.pathing.movement.MovementHelper;
 import baritone.utils.BaritoneProcessHelper;
 import baritone.utils.BlockStateInterface;
+import baritone.utils.CorrectionLogger;
 import baritone.utils.PathingCommandContext;
 import baritone.utils.schematic.MapArtSchematic;
 import baritone.utils.schematic.SelectionSchematic;
@@ -640,8 +641,22 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             baritone.getLookBehavior().updateTarget(rot, true);
             ctx.player().getInventory().setSelectedSlot(toPlace.get().hotbarSelection);
             baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
-            if ((ctx.isLookingAt(toPlace.get().placeAgainst) && ((BlockHitResult) ctx.objectMouseOver()).getDirection().equals(toPlace.get().side)) || ctx.playerRotations().isReallyCloseTo(rot)) {
-                baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
+            boolean hitAgainst = ctx.isLookingAt(toPlace.get().placeAgainst);
+            boolean hitSide = hitAgainst && ((BlockHitResult) ctx.objectMouseOver()).getDirection().equals(toPlace.get().side);
+            boolean rotationClose = ctx.playerRotations().isReallyCloseTo(rot);
+            boolean clickGate = (hitSide || rotationClose);
+            CorrectionLogger.logAlways("builder-click-gates target=" + _placing
+                    + " hit=" + (ctx.objectMouseOver() == null ? "null" : ctx.objectMouseOver().getType())
+                    + " hitAgainst=" + hitAgainst + " hitSide=" + hitSide
+                    + " rotationClose=" + rotationClose + " clickGate=" + clickGate
+                    + " playerRot=" + ctx.playerRotations() + " targetRot=" + rot);
+            if (clickGate) {
+                BlockHitResult validatedHit = ctx.objectMouseOver() instanceof BlockHitResult
+                        ? (BlockHitResult) ctx.objectMouseOver()
+                        : null;
+                CorrectionLogger.logAlways("builder-place-direct target=" + _placing
+                        + " validatedHit=" + (validatedHit == null ? "null" : validatedHit.getBlockPos() + "/" + validatedHit.getDirection()));
+                baritone.getInputOverrideHandler().attemptPlacementNow(validatedHit);
             }
             return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
         }
@@ -881,6 +896,13 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             this.fallback = fallback;
         }
 
+        public Goal primary() {
+            return primary;
+        }
+
+        public Goal fallback() {
+            return fallback;
+        }
 
         @Override
         public boolean isInGoal(int x, int y, int z) {

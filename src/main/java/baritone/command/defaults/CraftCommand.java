@@ -190,7 +190,7 @@ public class CraftCommand extends Command {
 
     @Override
     public Stream<String> tabComplete(String label, IArgConsumer args) throws CommandException {
-        if (!args.hasAny()) {
+        if (!args.hasAny() || args.hasExactlyOne()) {
             return new TabCompleteHelper()
                     .append(args.tabCompleteDatatype(ItemById.INSTANCE))
                     .sortAlphabetically()
@@ -199,16 +199,10 @@ public class CraftCommand extends Command {
         if (args.peekDatatypeOrNull(ItemById.INSTANCE) == null) {
             return Stream.empty();
         }
-        if (args.has(2)) {
-            return Stream.empty();
-        }
-        if (!args.hasExactlyOne()) {
-            args.get();
-        }
-        return new TabCompleteHelper()
-                .append(args.tabCompleteDatatype(ItemById.INSTANCE))
-                .sortAlphabetically()
-                .stream();
+        args.get();
+        return args.hasExactlyOne()
+                ? CustomCommandCompleter.suggest(args, "1", "16", "32", "64")
+                : Stream.empty();
     }
 
     @Override

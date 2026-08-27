@@ -51,7 +51,10 @@ C:\Users\Naqua\curseforge\minecraft\Instances\1.21.5\mods\
 | Dynamic parkour | automatic (speed/jump boost = longer jumps) |
 | Craft any recipe | `#craft <item>` (vanilla + modded, singleplayer, even undiscovered) |
 | Self defence combat | `#selfDefence true`; modes: `#attackType swordSweep / swordJump / axeJump / maceSmash` |
-| Mace dive-bomb | `#attackType maceSmash` + elytra + firework rockets |
+| Mace dive-bomb | `#attackType maceSmash` + equipped elytra + firework rockets; rocket-climbs, stows elytra, smashes, then restores/escapes |
 | Creeper handling | smash-dive with escape kit (`#selfDefenceCreeperDive`), otherwise avoided |
+| Predictive combat movement | enabled by `#selfDefenceCombatMovement`; simulates approach, retreat, hold and diagonal/side strafes against predicted target motion, rejecting walls, drops and hazards |
+| Combat movement render | `#selfDefenceRenderCombatMovement`; green=selected, yellow=alternative, red=unsafe, cyan=predicted target |
 | Shield/totem/strafe | `#selfDefenceUseShield`, `#selfDefenceTotemHealth`, `#selfDefenceStrafe` |
-| Logs | `baritone\corrections.log` (self-corrections), `baritone\selfdefence-miss.log` (missed hits) |
+| Combat failure recorder | `#lastfail`, `#lastfail frames`, or `#lastfail render`; structured traces append to `baritone\combat-failures.jsonl` |
+| Logs | `baritone\corrections.log`, `baritone\selfdefence-miss.log` (legacy miss summary), `baritone\combat-failures.jsonl` (bounded tick traces) |

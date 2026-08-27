@@ -27,6 +27,7 @@ import baritone.api.process.PathingCommand;
 import baritone.api.process.PathingCommandType;
 import baritone.behavior.PathingBehavior;
 import baritone.pathing.path.PathExecutor;
+import baritone.api.utils.input.Input;
 import net.minecraft.core.BlockPos;
 
 import java.util.*;
@@ -106,7 +107,13 @@ public class PathingControlManager implements IPathingControlManager {
                 break;
             case CANCEL_AND_SET_GOAL:
                 p.secretInternalSetGoal(command.goal);
+                boolean rightBeforeCancel = baritone.getInputOverrideHandler().isInputForcedDown(Input.CLICK_RIGHT);
                 p.cancelSegmentIfSafe();
+                boolean rightAfterCancel = baritone.getInputOverrideHandler().isInputForcedDown(Input.CLICK_RIGHT);
+                if (rightBeforeCancel || rightAfterCancel) {
+                    CorrectionLogger.logAlways("path-command cancelAndSetGoal rightBefore=" + rightBeforeCancel
+                            + " rightAfter=" + rightAfterCancel + " current=" + (p.getCurrent() != null));
+                }
                 break;
             case FORCE_REVALIDATE_GOAL_AND_PATH:
             case REVALIDATE_GOAL_AND_PATH:

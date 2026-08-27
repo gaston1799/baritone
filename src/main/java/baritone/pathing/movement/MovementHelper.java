@@ -51,6 +51,7 @@ import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.WaterFluid;
 import net.minecraft.world.level.pathfinder.PathComputationType;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.item.ItemUseAnimation;
@@ -1158,90 +1159,109 @@ public interface MovementHelper extends ActionCosts, Helper {
     }
 
     /**
-     * Forward walk-ahead takeoff solver for 1-block ascends.
-     * <p>
-     * Simulates the jump that would be launched from the player's CURRENT position
-     * and velocity, but with the horizontal direction taken from the movement's
-     * dest (not the player's momentary movement vector, which can point elsewhere),
-     * the current ground speed accelerated toward sprint max (walk-ahead), and the
-     * vanilla sprint-jump boost (x1.3) applied on the launch tick. The trajectory
-     * is then stepped tick by tick:
-     * <ul>
-     * <li>any block in the player's body band (feet+1, feet+2) that is not
-     *     passable = head bonk / wall hit -> the takeoff is invalid</li>
-     * <li>when the horizontal travel crosses the dest's X/Z, the feet height must
-     *     be at or above the dest's top, otherwise the jump is too close / too far
-     *     and the player collides with the step face</li>
-     * </ul>
-     * Returns true only when a jump launched right now would cleanly carry the
-     * player onto the ascend dest. Re-run every tick; as the player walks closer
-     * the crossing happens at a different point of the arc, so the first tick that
-     * returns true is the optimal takeoff.
+     * Build a TAS-style jump plan from the player's live position, velocity,
+     * sprint state, jump power, and collision box. The selected trajectory is
+     * also published to the renderer so diagnostics show the exact forecast
+     * used for the input decision.
      */
-    static boolean jumpClearsAscend(IPlayerContext ctx, BetterBlockPos src, BetterBlockPos dest) {
+    static JumpTrajectory planJump(IPlayerContext ctx, BetterBlockPos dest) {
+        return planJump(ctx, dest, ctx.player() != null
+                && Baritone.settings().allowSprint.value
+                && ctx.player().isSprinting());
+    }
+
+    static JumpTrajectory planJump(IPlayerContext ctx, BetterBlockPos dest, boolean sprintJump) {
         if (ctx.player() == null) {
-            return false;
+            return null;
+        }
+        JumpTrajectory trajectory = JumpTrajectorySimulator.plan(
+                ctx.player().position(),
+                ctx.player().getDeltaMovement(),
+                playerJumpPower(ctx),
+                sprintJump && Baritone.settings().allowSprint.value,
+                ctx.player().getBbWidth(),
+                ctx.player().getBbHeight(),
+                dest,
+                box -> trajectoryCollides(ctx, box)
+        );
+        JumpTrajectoryTrace.publish(trajectory);
+        return trajectory;
+    }
+
+    /**
+     * Compatibility entry point for straight ascends. Unlike the previous
+     * landing search, this models clearing a step face rather than descending
+     * onto a gap target. Minecraft allows the player to keep rising while
+     * pressed against that face, so the support block is not a fatal collision.
+     */
+    public static JumpTrajectory planAscendAt(IPlayerContext ctx, BetterBlockPos src, BetterBlockPos dest) {
+        return planAscendAt(ctx, src, dest, ctx.player() != null
+                && Baritone.settings().allowSprint.value
+                && ctx.player().isSprinting());
+    }
+
+    public static JumpTrajectory planAscendAt(IPlayerContext ctx, BetterBlockPos src, BetterBlockPos dest, boolean sprintJump) {
+        if (ctx.player() == null) {
+            return new JumpTrajectory(dest, List.of(), ctx.player() == null ? Vec3.ZERO : ctx.player().position(),
+                    JumpTrajectory.Outcome.NO_JUMP_POWER, new JumpTrajectory.ControlPlan(0, false), Double.NaN);
         }
         Vec3 pos = ctx.player().position();
         double dx = (dest.getX() + 0.5D) - pos.x;
         double dz = (dest.getZ() + 0.5D) - pos.z;
         double flat = Math.sqrt(dx * dx + dz * dz);
         if (flat < 0.2D) {
-            return true; // basically already there
+            return new JumpTrajectory(dest, List.of(pos, pos), pos,
+                    JumpTrajectory.Outcome.TARGET, new JumpTrajectory.ControlPlan(0, false), 0.0D);
         }
         double dirX = dx / flat;
         double dirZ = dz / flat;
-        Vec3 vel = ctx.player().getDeltaMovement();
-        // forward component of current velocity along the dest direction, accelerated
-        double speed = Math.abs(dirX * vel.x + dirZ * vel.z);
-        double maxSpeed = maxSprintSpeed(ctx);
-        if (Baritone.settings().allowSprint.value) {
-            speed = Math.min(speed + 0.086D, maxSpeed); // ground accel walk-ahead
+        Vec3 velocity = ctx.player().getDeltaMovement();
+        double speed = Math.max(0.0D, dirX * velocity.x + dirZ * velocity.z);
+        boolean sprinting = sprintJump && Baritone.settings().allowSprint.value;
+        if (sprinting) {
+            // Use the real sprint velocity. The old +0.086 walk-ahead fudge
+            // assumed sprint speed even while walking, so the sim said the
+            // jump cleared before the player was actually fast enough -> the
+            // premature-jump bug, so the live velocity is the truth.
+            speed = Math.min(speed, maxSprintSpeed(ctx));
         } else {
-            speed = Math.min(speed, 0.215D); // walking
+            speed = Math.min(speed, 0.215D);
         }
-        double jumpPower = playerJumpPower(ctx);
-        if (jumpPower <= 0.0D) {
-            return false;
-        }
-        // sprint-jump launch: x1.3 horizontal boost, jump power vertically
-        double vx = dirX * speed * 1.3D;
-        double vz = dirZ * speed * 1.3D;
-        double vy = jumpPower;
-        double px = pos.x, py = pos.y, pz = pos.z;
-        double traveled = 0.0D;
-        for (int i = 0; i < 30; i++) {
-            px += vx;
-            py += vy;
-            pz += vz;
-            traveled += Math.sqrt(vx * vx + vz * vz);
-            vy -= 0.08D;
-            vx *= 0.91D;
-            vz *= 0.91D;
-            if (traveled < 0.15D) {
-                continue; // ignore the first sliver of movement, still on takeoff block
-            }
-            int bx = Mth.floor(px);
-            int by = Mth.floor(py);
-            int bz = Mth.floor(pz);
-            // body band check: anything solid at torso/head height = bonk
-            BetterBlockPos bandPos = new BetterBlockPos(bx, by + 1, bz);
-            if (!canWalkThrough(ctx, bandPos) || !canWalkThrough(ctx, bandPos.above())) {
-                return false;
-            }
-            if (traveled >= flat - 0.25D && traveled <= flat + 0.75D) {
-                // horizontally at the dest - feet must clear the step top
-                if (py >= dest.getY() + 0.1D) {
-                    return true;
+        return JumpTrajectorySimulator.planAscend(
+                pos,
+                speed,
+                playerJumpPower(ctx),
+                sprinting,
+                ctx.player().getBbWidth(),
+                ctx.player().getBbHeight(),
+                dest,
+                box -> trajectoryCollides(ctx, box)
+        );
+    }
+
+    public static boolean jumpClearsAscend(IPlayerContext ctx, BetterBlockPos src, BetterBlockPos dest) {
+        JumpTrajectory trajectory = planAscendAt(ctx, src, dest);
+        JumpTrajectoryTrace.publish(trajectory);
+        return trajectory.reachesTarget();
+    }
+
+    static boolean trajectoryCollides(IPlayerContext ctx, AABB box) {
+        int minX = Mth.floor(box.minX + 1.0E-5D);
+        int maxX = Mth.floor(box.maxX - 1.0E-5D);
+        int minY = Mth.floor(box.minY + 1.0E-5D);
+        int maxY = Mth.floor(box.maxY - 1.0E-5D);
+        int minZ = Mth.floor(box.minZ + 1.0E-5D);
+        int maxZ = Mth.floor(box.maxZ - 1.0E-5D);
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    if (!canWalkThrough(ctx, new BetterBlockPos(x, y, z))) {
+                        return true;
+                    }
                 }
             }
-            if (traveled > flat + 0.75D) {
-                // passed the dest while too low - this takeoff is too close; a jump
-                // from further back would have crossed higher up the arc
-                return false;
-            }
         }
-        return false; // could not reach dest at all (too far) - keep walking
+        return false;
     }
 
     static void moveTowardsWithoutRotation(IPlayerContext ctx, MovementState state, float idealYaw) {

@@ -25,6 +25,7 @@ import baritone.api.utils.input.Input;
 import baritone.behavior.Behavior;
 import baritone.pathing.movement.MovementHelper;
 import net.minecraft.client.player.KeyboardInput;
+import net.minecraft.world.phys.BlockHitResult;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -73,7 +74,12 @@ public final class InputOverrideHandler extends Behavior implements IInputOverri
      */
     @Override
     public final void setInputForceState(Input input, boolean forced) {
+        boolean previous = this.inputForceStateMap.getOrDefault(input, false);
         this.inputForceStateMap.put(input, forced);
+        if ((input == Input.CLICK_RIGHT || input == Input.CLICK_LEFT) && previous != forced) {
+            CorrectionLogger.logAlways("input-set input=" + input + " forced=" + forced
+                    + " caller=" + inputCaller());
+        }
     }
 
     /**
@@ -81,6 +87,12 @@ public final class InputOverrideHandler extends Behavior implements IInputOverri
      */
     @Override
     public final void clearAllKeys() {
+        boolean right = isInputForcedDown(Input.CLICK_RIGHT);
+        boolean left = isInputForcedDown(Input.CLICK_LEFT);
+        if (right || left) {
+            CorrectionLogger.logAlways("input-clear right=" + right + " left=" + left
+                    + " caller=" + inputCaller());
+        }
         this.inputForceStateMap.clear();
     }
 
@@ -93,8 +105,15 @@ public final class InputOverrideHandler extends Behavior implements IInputOverri
             setInputForceState(Input.CLICK_LEFT, false);
         }
         if (isInputForcedDown(Input.CLICK_LEFT)) {
+            if (isInputForcedDown(Input.CLICK_RIGHT)) {
+                CorrectionLogger.logAlways("input-gate rightSuppressedByLeft=true");
+            }
             setInputForceState(Input.CLICK_RIGHT, false);
         }
+        CorrectionLogger.logAlways("input-gates beforeRight=" + isInputForcedDown(Input.CLICK_RIGHT)
+                + " left=" + isInputForcedDown(Input.CLICK_LEFT)
+                + " sneak=" + isInputForcedDown(Input.SNEAK)
+                + " consuming=" + MovementHelper.isConsumingItem(ctx));
         blockBreakHelper.tick(isInputForcedDown(Input.CLICK_LEFT));
         blockPlaceHelper.tick(isInputForcedDown(Input.CLICK_RIGHT));
         syncSprintKey();
@@ -132,5 +151,29 @@ public final class InputOverrideHandler extends Behavior implements IInputOverri
 
     public BlockBreakHelper getBlockBreakHelper() {
         return blockBreakHelper;
+    }
+
+    /**
+     * Executes one placement attempt immediately. This is used by the builder
+     * after it has already validated a live block hit; waiting for the next
+     * input tick can lose the one-tick click request when another behavior
+     * clears the override map first.
+     */
+    public void attemptPlacementNow() {
+        blockPlaceHelper.tick(true);
+    }
+
+    public void attemptPlacementNow(BlockHitResult validatedHit) {
+        blockPlaceHelper.tick(true, validatedHit);
+    }
+
+    private String inputCaller() {
+        for (StackTraceElement element : Thread.currentThread().getStackTrace()) {
+            if (!element.getClassName().equals(InputOverrideHandler.class.getName())
+                    && !element.getClassName().equals(Thread.class.getName())) {
+                return element.getClassName() + "." + element.getMethodName() + ":" + element.getLineNumber();
+            }
+        }
+        return "unknown";
     }
 }

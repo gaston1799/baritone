@@ -137,6 +137,18 @@ public class SelfDefenceHelperTest {
         assertEquals(null, SelfDefenceHelper.classifyWeapon(new ItemStack(Items.DIAMOND_PICKAXE)));
     }
 
+    @Test
+    public void poweredMaceClimbWaitsForAltitudeFromSameFootLevel() {
+        assertFalse(SelfDefenceHelper.shouldFinishMaceClimb(64.0D, 68.0D, 0.7D, 8, 8.0D, 30));
+        assertTrue(SelfDefenceHelper.shouldFinishMaceClimb(64.0D, 72.0D, 0.4D, 12, 8.0D, 30));
+    }
+
+    @Test
+    public void poweredMaceClimbFallsBackAtApexOrTimeout() {
+        assertTrue(SelfDefenceHelper.shouldFinishMaceClimb(64.0D, 69.0D, -0.01D, 10, 8.0D, 30));
+        assertTrue(SelfDefenceHelper.shouldFinishMaceClimb(64.0D, 69.0D, 0.2D, 30, 8.0D, 30));
+    }
+
     private static net.minecraft.core.NonNullList<ItemStack> inventory(ItemStack... stacks) {
         net.minecraft.core.NonNullList<ItemStack> inventory = net.minecraft.core.NonNullList.withSize(36, ItemStack.EMPTY);
         for (int i = 0; i < stacks.length; i++) {

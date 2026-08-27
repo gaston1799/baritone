@@ -16,19 +16,35 @@ import java.util.Collections;
 public final class CorrectionLogger {
 
     private static volatile long lastLogMs = 0;
+    private static String lastMessage = "";
+    private static long lastMessageMs;
 
     private CorrectionLogger() {}
 
     /**
-     * Append one correction event. Cheap enough to call from hot paths; a 1-ms
-     * minimum spacing prevents any spam flood from filling the file.
+     * Append one correction event. Identical hot-loop messages are coalesced so
+     * a reconciliation bug cannot write the same line every client tick.
      */
-    public static void log(String message) {
+    public static synchronized void log(String message) {
         long now = System.currentTimeMillis();
         if (now - lastLogMs < 1) {
             return;
         }
+        if (message.equals(lastMessage) && now - lastMessageMs < 500) {
+            return;
+        }
         lastLogMs = now;
+        lastMessage = message;
+        lastMessageMs = now;
+        append(message);
+    }
+
+    /** Append a diagnostic event without coalescing repeated messages. */
+    public static synchronized void logAlways(String message) {
+        append(message);
+    }
+
+    private static void append(String message) {
         try {
             Files.write(
                     Paths.get(System.getProperty("user.dir"), "baritone", "corrections.log"),

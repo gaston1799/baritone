@@ -79,9 +79,18 @@ public class StripmineCommand extends Command {
 
     @Override
     public Stream<String> tabComplete(String label, IArgConsumer args) throws CommandException {
-        if (args.hasExactly(1)) {
-            String partial = args.peekString().toLowerCase();
-            return Stream.of("setdeposit", "setjunk").filter(s -> s.startsWith(partial));
+        if (!args.hasAny() || args.hasExactlyOne()) {
+            return CustomCommandCompleter.suggest(args,
+                    "setdeposit", "setjunk",
+                    String.valueOf(Baritone.settings().stripMineLength.value), "64", "128", "256");
+        }
+        String first = args.getString();
+        if ((first.equalsIgnoreCase("setdeposit") || first.equalsIgnoreCase("setjunk"))) {
+            return Stream.empty();
+        }
+        if (args.hasExactlyOne()) {
+            return CustomCommandCompleter.suggest(args,
+                    String.valueOf(Baritone.settings().stripMineCorridors.value), "3", "5", "7", "9");
         }
         return Stream.empty();
     }

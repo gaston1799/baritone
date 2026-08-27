@@ -25,6 +25,7 @@ import baritone.api.utils.*;
 import baritone.api.utils.input.Input;
 import baritone.behavior.PathingBehavior;
 import baritone.utils.BlockStateInterface;
+import baritone.utils.CorrectionLogger;
 import java.util.*;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -140,6 +141,11 @@ public abstract class Movement implements IMovement, MovementHelper {
                 baritone.getLookBehavior().updateTarget(
                         rotation,
                         currentState.getTarget().hasToForceRotations()));
+        if (currentState.getInputStates().getOrDefault(Input.CLICK_RIGHT, false)) {
+            CorrectionLogger.logAlways("movement-input clickRight=true movement="
+                    + getClass().getSimpleName() + " status=" + currentState.getStatus()
+                    + " player=" + ctx.playerFeet());
+        }
         baritone.getInputOverrideHandler().clearAllKeys();
         currentState.getInputStates().forEach((input, forced) -> {
             baritone.getInputOverrideHandler().setInputForceState(input, forced);

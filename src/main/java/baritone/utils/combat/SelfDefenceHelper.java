@@ -121,6 +121,21 @@ public final class SelfDefenceHelper {
         return attackType != Settings.AttackType.SWORD_SWEEP;
     }
 
+    public static boolean shouldFinishMaceClimb(
+            double startY,
+            double currentY,
+            double verticalVelocity,
+            int elapsedTicks,
+            double requestedHeight,
+            int maxTicks
+    ) {
+        double climbHeight = Math.max(3.0D, requestedHeight);
+        int timeout = Math.max(10, maxTicks);
+        return currentY - startY >= climbHeight
+                || elapsedTicks >= timeout
+                || (elapsedTicks > 8 && verticalVelocity <= 0.0D);
+    }
+
     public static Settings.AttackType effectiveAttackType(Settings.AttackType requestedType, WeaponChoice choice) {
         if (choice == null) {
             return requestedType;

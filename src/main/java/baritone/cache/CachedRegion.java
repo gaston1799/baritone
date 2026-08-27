@@ -28,6 +28,8 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
@@ -117,6 +119,7 @@ public final class CachedRegion implements ICachedRegion {
             return;
         }
         removeExpired();
+        Path temporaryFile = null;
         try {
             Path path = Paths.get(directory);
             if (!Files.exists(path)) {
@@ -125,11 +128,16 @@ public final class CachedRegion implements ICachedRegion {
             }
             System.out.println("Saving region " + x + "," + z + " to disk " + path);
             Path regionFile = getRegionFile(path, this.x, this.z);
-            if (!Files.exists(regionFile)) {
-                Files.createFile(regionFile);
+            temporaryFile = regionFile.resolveSibling(regionFile.getFileName() + ".tmp");
+            Files.deleteIfExists(temporaryFile);
+            boolean[][] present = new boolean[32][32];
+            for (int x = 0; x < 32; x++) {
+                for (int z = 0; z < 32; z++) {
+                    present[x][z] = isSerializable(chunks[x][z]);
+                }
             }
             try (
-                    FileOutputStream fileOut = new FileOutputStream(regionFile.toFile());
+                    FileOutputStream fileOut = new FileOutputStream(temporaryFile.toFile());
                     GZIPOutputStream gzipOut = new GZIPOutputStream(fileOut, 16384);
                     DataOutputStream out = new DataOutputStream(gzipOut)
             ) {
@@ -137,7 +145,7 @@ public final class CachedRegion implements ICachedRegion {
                 for (int x = 0; x < 32; x++) {
                     for (int z = 0; z < 32; z++) {
                         CachedChunk chunk = this.chunks[x][z];
-                        if (chunk == null) {
+                        if (!present[x][z]) {
                             out.write(CHUNK_NOT_PRESENT);
                         } else {
                             out.write(CHUNK_PRESENT);
@@ -150,7 +158,7 @@ public final class CachedRegion implements ICachedRegion {
                 }
                 for (int x = 0; x < 32; x++) {
                     for (int z = 0; z < 32; z++) {
-                        if (chunks[x][z] != null) {
+                        if (present[x][z]) {
                             for (int i = 0; i < 256; i++) {
                                 out.writeUTF(BlockUtils.blockToString(chunks[x][z].getOverview()[i].getBlock()));
                             }
@@ -159,7 +167,7 @@ public final class CachedRegion implements ICachedRegion {
                 }
                 for (int x = 0; x < 32; x++) {
                     for (int z = 0; z < 32; z++) {
-                        if (chunks[x][z] != null) {
+                        if (present[x][z]) {
                             Map<String, List<BlockPos>> locs = chunks[x][z].getRelativeBlocks();
                             out.writeShort(locs.entrySet().size());
                             for (Map.Entry<String, List<BlockPos>> entry : locs.entrySet()) {
@@ -175,27 +183,37 @@ public final class CachedRegion implements ICachedRegion {
                 }
                 for (int x = 0; x < 32; x++) {
                     for (int z = 0; z < 32; z++) {
-                        if (chunks[x][z] != null) {
+                        if (present[x][z]) {
                             out.writeLong(chunks[x][z].cacheTimestamp);
                         }
                     }
                 }
             }
+            replaceAtomically(temporaryFile, regionFile);
+            temporaryFile = null;
             hasUnsavedChanges = false;
             System.out.println("Saved region successfully");
         } catch (Exception ex) {
             ex.printStackTrace();
+            if (temporaryFile != null) {
+                try {
+                    Files.deleteIfExists(temporaryFile);
+                } catch (IOException cleanupError) {
+                    cleanupError.printStackTrace();
+                }
+            }
         }
     }
 
     public synchronized void load(String directory) {
+        Path regionFile = null;
         try {
             Path path = Paths.get(directory);
             if (!Files.exists(path)) {
                 Files.createDirectories(path);
             }
 
-            Path regionFile = getRegionFile(path, this.x, this.z);
+            regionFile = getRegionFile(path, this.x, this.z);
             if (!Files.exists(regionFile)) {
                 return;
             }
@@ -304,6 +322,44 @@ public final class CachedRegion implements ICachedRegion {
             System.out.println("Loaded region successfully in " + (end - start) + "ms");
         } catch (Exception ex) { // corrupted files can cause NullPointerExceptions as well as IOExceptions
             ex.printStackTrace();
+            quarantineCorruptRegion(regionFile);
+        }
+    }
+
+    static boolean isCompleteOverview(Object[] overview) {
+        if (overview == null || overview.length != 256) {
+            return false;
+        }
+        for (Object state : overview) {
+            if (state == null) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isSerializable(CachedChunk chunk) {
+        return chunk != null && isCompleteOverview(chunk.getOverview());
+    }
+
+    private static void replaceAtomically(Path source, Path destination) throws IOException {
+        try {
+            Files.move(source, destination, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException ignored) {
+            Files.move(source, destination, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private static void quarantineCorruptRegion(Path regionFile) {
+        if (regionFile == null || !Files.exists(regionFile)) {
+            return;
+        }
+        Path quarantine = regionFile.resolveSibling(regionFile.getFileName() + ".corrupt-" + System.currentTimeMillis());
+        try {
+            Files.move(regionFile, quarantine);
+            System.err.println("Quarantined corrupted Baritone cache region as " + quarantine);
+        } catch (IOException quarantineError) {
+            quarantineError.printStackTrace();
         }
     }
 
